@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.env.local
+*.log
+backups/
+service-account*.json
+.wrangler
+.firebase
+.vercel

@@ -1,0 +1,477 @@
+import { useState } from 'react';
+import { addDoc, getCountFromServer, getDoc, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
+import { useCtx } from '../../app/AuthProvider';
+import { ROLES, tcol, tdoc } from '../../lib/tenant';
+import { audit } from '../../lib/audit';
+import { checkExam, computeResult, toCsv } from '../../lib/calc';
+import { byId, chunk, list } from '../../lib/data';
+import { Alert, Badge, Button, Input, Loading, Modal, PageHeader, Select, Table, Textarea, toOptions, downloadCsv, useAction, useAsync, useConfirm, useForm } from '../../components/ui';
+
+export default function Exams() {
+  const { role } = useCtx();
+  if (role === ROLES.STUDENT) return <><PageHeader title="My results" /><MyResults /></>;
+  if (role === ROLES.FACULTY) return <><PageHeader title="Marks entry" /><MarksEntry /></>;
+  return <AdminExams />;
+}
+
+/* ---------------- admin: exams, subjects, publishing ---------------- */
+
+function AdminExams() {
+  const { iid } = useCtx();
+  const [creating, setCreating] = useState(false);
+  const [openId, setOpenId] = useState('');
+  const { data, loading, error, reload } = useAsync(() => list(query(tcol(iid, 'exams'), orderBy('startDate', 'desc'))), [iid]);
+  if (loading) return <Loading />;
+  const exam = data?.find((e) => e.id === openId);
+  return (
+    <>
+      <PageHeader title="Exams">
+        <Button variant="primary" onClick={() => setCreating(true)}>Create exam</Button>
+      </PageHeader>
+      <Alert kind="error">{error?.message}</Alert>
+      <Table
+        rows={data ?? []}
+        empty="No exams yet."
+        columns={[
+          { key: 'name', label: 'Exam' }, { key: 'type', label: 'Type' },
+          { key: 'startDate', label: 'From' }, { key: 'endDate', label: 'To' },
+          { key: 'status', label: 'Status', render: (e) => <Badge kind={e.status === 'PUBLISHED' ? 'ok' : 'warn'}>{e.status}</Badge> },
+        ]}
+        actions={(e) => <Button small onClick={() => setOpenId(e.id === openId ? '' : e.id)}>{e.id === openId ? 'Close' : 'Manage'}</Button>}
+      />
+      {exam && <ExamManager key={exam.id} exam={exam} onChange={reload} />}
+      {creating && <CreateExam onClose={(saved) => { setCreating(false); if (saved) reload(); }} />}
+    </>
+  );
+}
+
+function CreateExam({ onClose }) {
+  const { iid } = useCtx();
+  const semesters = useAsync(() => list(tcol(iid, 'semesters')), [iid]);
+  const { values, bind } = useForm({ name: '', type: '', semesterId: '', startDate: '', endDate: '' });
+  const { busy, error, run } = useAction();
+  const submit = (e) => {
+    e.preventDefault();
+    run(async () => {
+      const sem = byId(semesters.data)[values.semesterId];
+      await addDoc(tcol(iid, 'exams'), {
+        name: values.name.trim(), type: values.type.trim(), courseId: sem.courseId, semesterId: sem.id,
+        academicYearId: sem.academicYearId, startDate: values.startDate, endDate: values.endDate,
+        status: 'DRAFT', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      });
+      onClose(true);
+    });
+  };
+  return (
+    <Modal title="Create exam" onClose={() => onClose(false)}>
+      <form onSubmit={submit}>
+        <Alert kind="error">{error}</Alert>
+        <div className="form-grid">
+          <Input label="Name" required {...bind('name')} />
+          <Input label="Type" hint="e.g. Mid-term, Final" required {...bind('type')} />
+          <Select label="Semester" required options={toOptions(semesters.data ?? [])} {...bind('semesterId')} />
+          <Input label="Start date" type="date" required {...bind('startDate')} />
+          <Input label="End date" type="date" required {...bind('endDate')} />
+        </div>
+        <div className="row" style={{ marginTop: 12 }}>
+          <Button variant="primary" type="submit" disabled={busy}>Create</Button>
+          <Button onClick={() => onClose(false)}>Cancel</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// Opening the screen reads counts only. Loading every marks document (about 12,000 for 2000 students x 6 papers)
+// on each click would burn the shared daily read quota.
+async function loadSummary(iid, exam) {
+  const count = async (q) => (await getCountFromServer(q)).data().count;
+  const [examSubjects, subjects, semester, active, completed, entered] = await Promise.all([
+    list(query(tcol(iid, 'examSubjects'), where('examId', '==', exam.id))),
+    list(query(tcol(iid, 'subjects'), where('courseId', '==', exam.courseId))),
+    getDoc(tdoc(iid, 'semesters', exam.semesterId)),
+    count(query(tcol(iid, 'enrollments'), where('semesterId', '==', exam.semesterId), where('status', '==', 'ACTIVE'))),
+    count(query(tcol(iid, 'enrollments'), where('semesterId', '==', exam.semesterId), where('status', '==', 'COMPLETED'))),
+    count(query(tcol(iid, 'studentMarks'), where('examId', '==', exam.id))),
+  ]);
+  // Only subjects of this exam's semester can be papers: nobody teaches the others here.
+  const ofSemester = subjects.filter((s) => s.semesterNumber === semester.data()?.number);
+  return { examSubjects, subjects: ofSemester, S: byId(ofSemester), students: active + completed, entered };
+}
+
+// The full read: every enrollment and every marks record. Only when the admin asks, and when publishing.
+async function loadExam(iid, exam) {
+  const [examSubjects, enrollments, marks] = await Promise.all([
+    list(query(tcol(iid, 'examSubjects'), where('examId', '==', exam.id))),
+    list(query(tcol(iid, 'enrollments'), where('semesterId', '==', exam.semesterId))),
+    list(query(tcol(iid, 'studentMarks'), where('examId', '==', exam.id))),
+  ]);
+  return { examSubjects, enrollments: enrollments.filter((e) => e.status !== 'WITHDRAWN'), marks };
+}
+
+function ExamManager({ exam, onChange }) {
+  const { iid, uid } = useCtx();
+  const draft = exam.status === 'DRAFT';
+  const [reopening, setReopening] = useState(false);
+  const [reason, setReason] = useState('');
+  const { data, loading, error, reload } = useAsync(() => loadSummary(iid, exam), [exam.id, exam.status]);
+  const [details, setDetails] = useState(null); // the full check, only after the admin asks for it
+  const [adding, setAdding] = useState(false);
+  const action = useAction();
+  const confirm = useConfirm();
+
+  if (loading) return <Loading />;
+  if (error) return <Alert kind="error">{error.message}</Alert>;
+
+  const chosen = new Set(data.examSubjects.map((x) => x.subjectId));
+  const addSubject = async (values) => {
+    const s = data.S[values.subjectId];
+    await setDoc(tdoc(iid, 'examSubjects', `${exam.id}_${s.id}`), {
+      examId: exam.id, subjectId: s.id, subjectName: s.name, maxMarks: Number(values.maxMarks || s.maxMarks),
+      passMarks: Number(values.passMarks || s.passMarks), createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    });
+    setDetails(null);
+    reload();
+  };
+
+  const { gaps, wrongSection } = details ? checkExam(details) : { gaps: [], wrongSection: [] };
+  const resultCount = data.students;
+  const expected = data.students * data.examSubjects.length;
+
+  const checkMarks = () => action.run(async () => setDetails(await loadExam(iid, exam)));
+
+  const askRemovePaper = (es) =>
+    action.run(async () => {
+      const count = (await getCountFromServer(query(tcol(iid, 'studentMarks'), where('examSubjectId', '==', es.id)))).data().count;
+      const warning = count ? ` and the ${count} marks already entered for it` : '';
+      confirm.ask({ title: `Remove ${es.subjectName}?`, body: `This removes the paper${warning}. It cannot be undone.`, label: 'Remove paper' }, () => removePaper(es));
+    });
+
+  const removePaper = (es) =>
+    action.run(async () => {
+      // Its marks go too: the paper's id is reused if the subject is added again, which would bring old marks back.
+      // Read them fresh: a teacher may have saved more since the question was asked.
+      const marks = await list(query(tcol(iid, 'studentMarks'), where('examSubjectId', '==', es.id)));
+      const batches = chunk(marks, 450).map((part) => {
+        const b = writeBatch(db);
+        part.forEach((m) => b.delete(tdoc(iid, 'studentMarks', m.id)));
+        return b;
+      });
+      const last = writeBatch(db);
+      last.delete(tdoc(iid, 'examSubjects', es.id));
+      batches.push(last);
+      // The log entry rides in the first batch, so anything that gets deleted is also logged.
+      audit(batches[0], { iid, uid }, 'PAPER_REMOVED', 'examSubjects', es.id, { subject: es.subjectName, marksDeleted: marks.length });
+      for (const b of batches) await b.commit();
+      setDetails(null);
+      reload();
+    });
+
+  const publish = () =>
+    action.run(async () => {
+      // Re-read everything now: a teacher may have corrected marks since this screen loaded.
+      const fresh = await loadExam(iid, exam);
+      const check = checkExam(fresh);
+      if (check.gaps.length || check.wrongSection.length) {
+        setDetails(fresh);
+        throw new Error(`${check.gaps.length} marks are missing and ${check.wrongSection.length} are in the wrong section. See the list below.`);
+      }
+      const marksById = check.marksById;
+      const results = fresh.enrollments.map((en) => {
+        const papers = fresh.examSubjects.map((es) => {
+          const m = marksById[`${es.id}_${en.studentId}`];
+          return { name: es.subjectName, marks: m.absent ? 0 : m.marks, absent: !!m.absent, maxMarks: es.maxMarks, passMarks: es.passMarks };
+        });
+        return { en, papers, ...computeResult(papers) };
+      });
+      // Draft results first, in chunks. Students cannot see them until the one write below.
+      for (const part of chunk(results, 450)) {
+        const batch = writeBatch(db);
+        part.forEach((r) => batch.set(tdoc(iid, 'results', `${exam.id}_${r.en.studentId}`), {
+          examId: exam.id, studentId: r.en.studentId, studentName: r.en.studentName, enrollmentNumber: r.en.enrollmentNumber,
+          total: r.total, maxTotal: r.maxTotal, percentage: r.percentage, passed: r.passed, subjects: r.papers,
+          computedAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        }));
+        await batch.commit();
+      }
+      const batch = writeBatch(db);
+      audit(batch, { iid, uid }, 'RESULTS_PUBLISHED', 'exams', exam.id, { students: results.length });
+      batch.update(tdoc(iid, 'exams', exam.id), { status: 'PUBLISHED', publishedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      await batch.commit();
+      onChange();
+    }, 'Results published.');
+
+  // Admin clean-up of a stray or wrong marks record while the exam is a draft; the right teacher re-enters it.
+  const removeMark = (w) =>
+    action.run(async () => {
+      const batch = writeBatch(db);
+      audit(batch, { iid, uid }, 'MARKS_RECORD_REMOVED', 'studentMarks', w.id, { student: w.student, paper: w.paper });
+      batch.delete(tdoc(iid, 'studentMarks', w.id));
+      await batch.commit();
+      setDetails(await loadExam(iid, exam));
+      reload();
+    });
+
+  const unpublish = (reason) =>
+    action.run(async () => {
+      const batch = writeBatch(db);
+      audit(batch, { iid, uid }, 'RESULTS_UNPUBLISHED', 'exams', exam.id, { reason });
+      batch.update(tdoc(iid, 'exams', exam.id), { status: 'DRAFT', publishedAt: null, updatedAt: serverTimestamp() });
+      await batch.commit();
+      setReopening(false);
+      onChange();
+    }, 'Results hidden from students. Marks can be corrected now.');
+
+  const exportCsv = () =>
+    action.run(async () => {
+      const rows = await list(query(tcol(iid, 'results'), where('examId', '==', exam.id)));
+      downloadCsv(`${exam.name}-results.csv`, toCsv([
+        ['Enrollment no.', 'Name', 'Total', 'Out of', 'Percentage', 'Result'],
+        ...rows.map((r) => [r.enrollmentNumber, r.studentName, r.total, r.maxTotal, r.percentage, r.passed ? 'PASS' : 'FAIL']),
+      ]));
+    });
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h2>{exam.name}</h2>
+      <Alert kind="error">{action.error}</Alert>
+      <Alert kind="ok">{action.done}</Alert>
+      <h3>Papers</h3>
+      <Table
+        rows={data.examSubjects}
+        empty="No papers yet."
+        columns={[{ key: 'subjectName', label: 'Subject' }, { key: 'maxMarks', label: 'Max marks' }, { key: 'passMarks', label: 'Pass marks' }]}
+        actions={draft ? (es) => <Button small variant="danger" disabled={action.busy} onClick={() => askRemovePaper(es)}>Remove paper and its marks</Button> : undefined}
+      />
+      {draft && <div className="row" style={{ margin: '12px 0' }}><Button onClick={() => setAdding(true)}>Add paper</Button></div>}
+      <h3>Publishing</h3>
+      {draft ? (
+        <>
+          <p>
+            {data.students} students × {data.examSubjects.length} papers: <strong>{data.entered}</strong> of {expected} marks entered.{' '}
+            <Button small onClick={checkMarks} disabled={action.busy || !expected}>Check for missing marks</Button>
+          </p>
+          {gaps.length > 0 && (
+            <Alert kind="error">
+              {gaps.length} marks are missing. Faculty must enter a mark (or mark the student absent) before publishing.
+              <ul>{gaps.slice(0, 10).map((g) => <li key={g.id}>{g.student} — {g.paper}</li>)}</ul>
+              {gaps.length > 10 && <p>…and {gaps.length - 10} more.</p>}
+            </Alert>
+          )}
+          {wrongSection.length > 0 && (
+            <Alert kind="error">
+              {wrongSection.length} marks were entered for a different section than the student's enrollment. Remove each
+              one; the teacher of that section then enters it again.
+              <ul>
+                {wrongSection.slice(0, 10).map((w) => (
+                  <li key={w.id}>
+                    {w.student} — {w.paper}{' '}
+                    <Button small variant="danger" disabled={action.busy} onClick={() => confirm.ask({ title: 'Remove this marks record?', body: `${w.student}, ${w.paper}. The teacher of the right section enters it again.`, label: 'Remove record' }, () => removeMark(w))}>Remove record</Button>
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+          )}
+          <p className="muted">Publishing writes {resultCount} result records, against the shared daily free quota. Avoid doing it on a heavy marks-entry day.</p>
+          <Button variant="primary" onClick={() => confirm.ask({ title: 'Publish results?', body: `${resultCount} students will see their results straight away, and marks are locked until you unpublish.`, label: 'Publish', danger: false }, publish)}
+            disabled={action.busy || gaps.length > 0 || wrongSection.length > 0 || !data.examSubjects.length || !resultCount || data.entered < expected}>
+            {action.busy ? 'Publishing…' : 'Publish results'}
+          </Button>
+        </>
+      ) : (
+        <div className="row">
+          <Button onClick={exportCsv} disabled={action.busy}>Export results CSV</Button>
+          <Button variant="danger" disabled={action.busy} onClick={() => setReopening(true)}>Unpublish to correct marks</Button>
+        </div>
+      )}
+      {confirm.dialog}
+      {reopening && (
+        <Modal title="Unpublish results?" onClose={() => setReopening(false)}>
+          <Alert kind="error">{action.error}</Alert>
+          <p>Students stop seeing these results until you publish again. The reason is kept in the audit log.</p>
+          <Textarea label="Why are the marks being corrected?" required minLength={5} maxLength={300} value={reason} onChange={setReason} />
+          <div className="modal-actions">
+            <Button onClick={() => setReopening(false)}>Cancel</Button>
+            <Button variant="danger" disabled={action.busy || reason.trim().length < 5} onClick={() => unpublish(reason.trim())}>Unpublish</Button>
+          </div>
+        </Modal>
+      )}
+      {adding && <AddPaper subjects={data.subjects.filter((s) => !chosen.has(s.id))} onSave={addSubject} onClose={() => setAdding(false)} />}
+    </div>
+  );
+}
+
+function AddPaper({ subjects, onSave, onClose }) {
+  const { values, bind } = useForm({ subjectId: '', maxMarks: '', passMarks: '' });
+  const { busy, error, run } = useAction();
+  const submit = (e) => {
+    e.preventDefault();
+    run(async () => { await onSave(values); onClose(); });
+  };
+  return (
+    <Modal title="Add paper" onClose={onClose}>
+      <form onSubmit={submit}>
+        <Alert kind="error">{error}</Alert>
+        <div className="form-grid">
+          <Select label="Subject" required options={toOptions(subjects)} {...bind('subjectId')} />
+          <Input label="Max marks" type="number" hint="blank = subject default" {...bind('maxMarks')} />
+          <Input label="Pass marks" type="number" hint="blank = subject default" {...bind('passMarks')} />
+        </div>
+        <div className="row">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" type="submit" disabled={busy}>{busy ? 'Adding…' : 'Add paper'}</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/* ---------------- faculty: marks entry ---------------- */
+
+function MarksEntry() {
+  const { iid, uid, profile } = useCtx();
+  const [examId, setExamId] = useState('');
+  const [paperId, setPaperId] = useState('');
+  const base = useAsync(async () => {
+    const [exams, assignments] = await Promise.all([
+      list(query(tcol(iid, 'exams'), where('status', '==', 'DRAFT'))),
+      list(query(tcol(iid, 'teachingAssignments'), where('facultyId', '==', profile.facultyId), where('active', '==', true))),
+    ]);
+    return { exams, assignments };
+  }, [iid]);
+  const papers = useAsync(
+    () => (examId ? list(query(tcol(iid, 'examSubjects'), where('examId', '==', examId))) : Promise.resolve([])),
+    [iid, examId],
+  );
+  if (base.loading) return <Loading />;
+  const exam = base.data.exams.find((e) => e.id === examId);
+  // Only papers the teacher actually teaches in that exam's semester.
+  const mine = (papers.data ?? []).flatMap((p) => {
+    const a = base.data.assignments.find((x) => x.subjectId === p.subjectId && x.semesterId === exam?.semesterId);
+    return a ? [{ paper: p, a }] : [];
+  });
+  const picked = mine.find((m) => m.paper.id === paperId);
+  return (
+    <>
+      <Alert kind="error">{base.error?.message || papers.error?.message}</Alert>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <Select label="Exam (open for marks)" value={examId} onChange={(v) => { setExamId(v); setPaperId(''); }} options={toOptions(base.data.exams)} />
+        <Select label="Paper" value={paperId} onChange={setPaperId} options={mine.map((m) => ({ value: m.paper.id, label: `${m.paper.subjectName} (max ${m.paper.maxMarks})` }))} />
+      </div>
+      {examId && !papers.loading && mine.length === 0 && <Alert kind="info">This exam has no paper for a class you teach.</Alert>}
+      {picked && <MarksSheet key={picked.paper.id} exam={exam} paper={picked.paper} a={picked.a} ctx={{ iid, uid }} />}
+    </>
+  );
+}
+
+function MarksSheet({ exam, paper, a, ctx }) {
+  const { data, loading, error, reload } = useAsync(async () => {
+    const [enrollments, marks] = await Promise.all([
+      list(query(tcol(ctx.iid, 'enrollments'), where('semesterId', '==', a.semesterId), where('sectionId', '==', a.sectionId))),
+      list(query(tcol(ctx.iid, 'studentMarks'), where('examSubjectId', '==', paper.id), where('enteredBy', '==', ctx.uid))),
+    ]);
+    return {
+      roster: enrollments.filter((e) => e.status === 'ACTIVE').sort((x, y) => x.enrollmentNumber.localeCompare(y.enrollmentNumber)),
+      saved: byId(marks.map((m) => ({ ...m, id: m.studentId }))),
+    };
+  }, [paper.id]);
+  const [edits, setEdits] = useState({});
+  const { busy, error: err, done, run } = useAction();
+
+  if (loading) return <Loading />;
+  if (error) return <Alert kind="error">{error.message}</Alert>;
+  const valueOf = (s) => edits[s.studentId] ?? (data.saved[s.studentId] ? { marks: String(data.saved[s.studentId].marks), absent: !!data.saved[s.studentId].absent } : { marks: '', absent: false });
+
+  const save = () =>
+    run(async () => {
+      const batch = writeBatch(db);
+      let n = 0;
+      for (const s of data.roster) {
+        if (!edits[s.studentId]) continue;
+        const v = edits[s.studentId];
+        const marks = v.absent ? 0 : Number(v.marks);
+        if (!v.absent && (v.marks === '' || Number.isNaN(marks) || marks < 0 || marks > paper.maxMarks)) {
+          throw new Error(`${s.studentName}: enter marks from 0 to ${paper.maxMarks}, or tick Absent.`);
+        }
+        const ref = tdoc(ctx.iid, 'studentMarks', `${paper.id}_${s.studentId}`);
+        if (data.saved[s.studentId]) {
+          batch.update(ref, { marks, absent: !!v.absent, updatedAt: serverTimestamp() });
+        } else {
+          batch.set(ref, {
+            examId: exam.id, examSubjectId: paper.id, assignmentId: a.id, sectionId: a.sectionId, studentId: s.studentId,
+            marks, absent: !!v.absent, enteredBy: ctx.uid, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+          });
+        }
+        n++;
+      }
+      if (!n) throw new Error('Nothing changed.');
+      await batch.commit();
+      setEdits({});
+      reload();
+    }, 'Marks saved.');
+
+  return (
+    <div className="card">
+      <Alert kind="error">{err}</Alert>
+      <Alert kind="ok">{done}</Alert>
+      <Table
+        rows={data.roster.map((s) => ({ ...s, id: s.studentId }))}
+        empty="No active students in this section."
+        columns={[
+          { key: 'enrollmentNumber', label: 'Enrollment no.' },
+          { key: 'studentName', label: 'Name' },
+          { key: 'marks', label: `Marks (max ${paper.maxMarks})`, render: (s) => (
+            <input type="number" min="0" max={paper.maxMarks} aria-label={`Marks for ${s.studentName}`} style={{ width: 100 }}
+              disabled={valueOf(s).absent} value={valueOf(s).marks}
+              onChange={(e) => setEdits({ ...edits, [s.studentId]: { ...valueOf(s), marks: e.target.value } })} />
+          ) },
+          { key: 'absent', label: 'Absent', render: (s) => (
+            <input type="checkbox" aria-label={`${s.studentName} absent`} style={{ width: 20, minHeight: 20 }} checked={valueOf(s).absent}
+              onChange={(e) => setEdits({ ...edits, [s.studentId]: { ...valueOf(s), absent: e.target.checked } })} />
+          ) },
+        ]}
+      />
+      <div className="row" style={{ marginTop: 12 }}>
+        <Button variant="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save marks'}</Button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- student: published results ---------------- */
+
+function MyResults() {
+  const { iid, profile } = useCtx();
+  // Rules do not filter: a query that could touch an unpublished result is rejected as a whole.
+  // So read the published exams first, then fetch this student's result for each by its ID.
+  const { data, loading, error } = useAsync(async () => {
+    const exams = await list(query(tcol(iid, 'exams'), where('status', '==', 'PUBLISHED')));
+    const snaps = await Promise.all(exams.map((e) => getDoc(tdoc(iid, 'results', `${e.id}_${profile.studentId}`))));
+    return snaps.flatMap((s, i) => (s.exists() ? [{ id: s.id, ...s.data(), exam: exams[i] }] : []));
+  }, [iid]);
+  if (loading) return <Loading />;
+  if (error) return <Alert kind="error">{error.message}</Alert>;
+  if (!data.length) return <Alert kind="info">No results have been published yet.</Alert>;
+  return (
+    <>
+      <div className="row"><Button onClick={() => window.print()}>Print / save as PDF</Button></div>
+      {data.map((r) => (
+        <div className="card" key={r.id} style={{ marginTop: 12 }}>
+          <h2>{r.exam.name}</h2>
+          <p>
+            <strong>{r.total} / {r.maxTotal}</strong> · {r.percentage}% · <Badge kind={r.passed ? 'ok' : 'bad'}>{r.passed ? 'PASS' : 'FAIL'}</Badge>
+          </p>
+          <Table
+            rows={r.subjects.map((s, i) => ({ ...s, id: i }))}
+            columns={[
+              { key: 'name', label: 'Subject' },
+              { key: 'marks', label: 'Marks', render: (s) => (s.absent ? 'Absent' : s.marks) },
+              { key: 'maxMarks', label: 'Max' }, { key: 'passMarks', label: 'Pass' },
+            ]}
+          />
+        </div>
+      ))}
+    </>
+  );
+}

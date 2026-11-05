@@ -1,0 +1,140 @@
+import { useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { doc, getDoc, query, serverTimestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
+import { useCtx } from '../../app/AuthProvider';
+import { tcol, tdoc } from '../../lib/tenant';
+import { audit } from '../../lib/audit';
+import { chunk, list } from '../../lib/data';
+import FilePanel from '../../components/FilePanel';
+import { Alert, Badge, Button, Facts, Input, Loading, Modal, PageHeader, Table, Tabs, useAction, useAsync, useConfirm, useForm } from '../../components/ui';
+
+export default function FacultyDetail() {
+  const { id } = useParams();
+  const { iid } = useCtx();
+  const [tab, setTab] = useState('profile');
+  const { data: f, loading, error, reload } = useAsync(async () => {
+    const snap = await getDoc(tdoc(iid, 'faculty', id));
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  }, [iid, id]);
+
+  if (loading) return <Loading />;
+  if (error) return <Alert kind="error">{error.message}</Alert>;
+  if (!f) return <Alert kind="error">Faculty member not found.</Alert>;
+  return (
+    <>
+      <PageHeader title={f.name}>
+        <Badge kind={f.status === 'ACTIVE' ? 'ok' : 'bad'}>{f.status}</Badge>
+        <Link to="/faculty">Back to faculty</Link>
+      </PageHeader>
+      <Tabs value={tab} onChange={setTab}
+        tabs={[{ value: 'profile', label: 'Profile' }, { value: 'classes', label: 'Classes' }, { value: 'documents', label: 'Documents' }]} />
+      {tab === 'profile' && <Profile f={f} reload={reload} />}
+      {tab === 'classes' && <Classes f={f} />}
+      {tab === 'documents' && <FilePanel collection="faculty" ownerId={f.id} canUpload />}
+    </>
+  );
+}
+
+function Profile({ f, reload }) {
+  const { iid, uid } = useCtx();
+  const [editing, setEditing] = useState(false);
+  const { busy, error, done, run } = useAction();
+  const confirm = useConfirm();
+
+  const setActive = (active) =>
+    run(async () => {
+      const batch = writeBatch(db);
+      const auditId = audit(batch, { iid, uid }, active ? 'FACULTY_REACTIVATED' : 'FACULTY_DEACTIVATED', 'faculty', f.id, {});
+      batch.update(tdoc(iid, 'faculty', f.id), { status: active ? 'ACTIVE' : 'INACTIVE', updatedAt: serverTimestamp() });
+      if (f.uid) batch.update(doc(db, 'users', f.uid), { active, updatedAt: serverTimestamp(), auditId });
+      await batch.commit();
+      reload();
+    }, active ? 'Reactivated.' : 'Deactivated. Their login is blocked. Replace them on their classes under Academics.');
+
+  return (
+    <div className="card">
+      <Alert kind="error">{error}</Alert>
+      <Alert kind="ok">{done}</Alert>
+      <Facts items={[['Employee code', f.employeeCode], ['Email', f.email], ['Full name', f.name], ['Phone', f.phone], ['Designation', f.designation]]} />
+      <div className="row">
+        <Button variant="primary" disabled={busy} onClick={() => setEditing(true)}>Edit details</Button>
+        {f.status === 'ACTIVE'
+          ? <Button variant="danger" disabled={busy} onClick={() => confirm.ask({ title: `Deactivate ${f.name}?`, body: 'Their login is blocked. Replace them on their classes under Academics.', label: 'Deactivate' }, () => setActive(false))}>Deactivate</Button>
+          : <Button disabled={busy} onClick={() => confirm.ask({ title: `Reactivate ${f.name}?`, body: 'Their login works again.', label: 'Reactivate', danger: false }, () => setActive(true))}>Reactivate</Button>}
+      </div>
+      {confirm.dialog}
+      {editing && <EditFaculty f={f} onClose={(saved) => { setEditing(false); if (saved) reload(); }} />}
+    </div>
+  );
+}
+
+function EditFaculty({ f, onClose }) {
+  const { iid, uid } = useCtx();
+  const { values, bind } = useForm({ name: f.name, phone: f.phone ?? '', designation: f.designation ?? '' });
+  const { busy, error, run } = useAction();
+  const save = (e) => {
+    e.preventDefault();
+    run(async () => {
+      const name = values.name.trim();
+      if (name !== f.name) {
+        const [assignments, slots] = await Promise.all([
+          list(query(tcol(iid, 'teachingAssignments'), where('facultyId', '==', f.id))),
+          list(query(tcol(iid, 'timetableSlots'), where('facultyId', '==', f.id))),
+        ]);
+        // A slot write costs 3 rule lookups and one batch allows about 20, so a few at a time. Slots go first: if one
+        // fails, the profile is unchanged and saving again repeats the same updates.
+        for (const part of chunk(slots, 5)) {
+          const b = writeBatch(db);
+          part.forEach((sl) => b.update(tdoc(iid, 'timetableSlots', sl.id), { facultyName: name, updatedAt: serverTimestamp() }));
+          await b.commit();
+        }
+        const batch = writeBatch(db);
+        batch.update(tdoc(iid, 'faculty', f.id), { ...values, name, updatedAt: serverTimestamp() });
+        assignments.forEach((a) => batch.update(tdoc(iid, 'teachingAssignments', a.id), { facultyName: name, updatedAt: serverTimestamp() }));
+        if (f.uid) {
+          const auditId = audit(batch, { iid, uid }, 'FACULTY_RENAMED', 'faculty', f.id, { old: f.name, new: name });
+          batch.update(doc(db, 'users', f.uid), { displayName: name, updatedAt: serverTimestamp(), auditId });
+        }
+        await batch.commit();
+      } else {
+        await updateDoc(tdoc(iid, 'faculty', f.id), { ...values, updatedAt: serverTimestamp() });
+      }
+      onClose(true);
+    });
+  };
+  return (
+    <Modal title="Edit faculty member" onClose={() => onClose(false)}>
+      <form onSubmit={save}>
+        <Alert kind="error">{error}</Alert>
+        <div className="form-grid">
+          <Input label="Full name" required {...bind('name')} />
+          <Input label="Phone" {...bind('phone')} />
+          <Input label="Designation" {...bind('designation')} />
+        </div>
+        <p className="muted">The employee code and email cannot be changed.</p>
+        <div className="row">
+          <Button onClick={() => onClose(false)}>Cancel</Button>
+          <Button variant="primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function Classes({ f }) {
+  const { iid } = useCtx();
+  const { data, loading } = useAsync(() => list(query(tcol(iid, 'teachingAssignments'), where('facultyId', '==', f.id))), [iid, f.id]);
+  if (loading) return <Loading />;
+  return (
+    <Table
+      rows={data}
+      empty="No classes assigned. Assign them under Academics."
+      columns={[
+        { key: 'subjectName', label: 'Subject' },
+        { key: 'sectionId', label: 'Section ID' },
+        { key: 'active', label: 'Status', render: (a) => <Badge kind={a.active ? 'ok' : ''}>{a.active ? 'Active' : 'Ended'}</Badge> },
+      ]}
+    />
+  );
+}
