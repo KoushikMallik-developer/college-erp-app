@@ -1,4 +1,4 @@
-import { Bytes, deleteDoc, getDoc, orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { Bytes, getDoc, orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
 import { tcol, tdoc } from './tenant';
 import { list } from './data';

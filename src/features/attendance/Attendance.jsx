@@ -6,7 +6,7 @@ import { useCtx } from '../../app/AuthProvider';
 import { ROLES, tcol, tdoc } from '../../lib/tenant';
 import { audit } from '../../lib/audit';
 import { STATUSES, attendanceBySubject, attendanceEntries, groupByCost, percent, planAttendanceWrites, recordKey, toCsv } from '../../lib/calc';
-import { byId, chunk, list } from '../../lib/data';
+import { byId, list } from '../../lib/data';
 import { searchPeople } from '../../components/SearchPalette';
 import { Alert, Badge, Button, Input, Loading, PageHeader, Select, Table, Tabs, downloadCsv, useAction, useAsync, linkBtn, linkList } from '../../components/ui';
 
