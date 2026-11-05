@@ -8,7 +8,7 @@ import { audit } from '../../lib/audit';
 import { STATUSES, attendanceBySubject, attendanceEntries, groupByCost, percent, planAttendanceWrites, recordKey, toCsv } from '../../lib/calc';
 import { byId, chunk, list } from '../../lib/data';
 import { searchPeople } from '../../components/SearchPalette';
-import { Alert, Badge, Button, Input, Loading, PageHeader, Select, Table, Tabs, downloadCsv, useAction, useAsync } from '../../components/ui';
+import { Alert, Badge, Button, Input, Loading, PageHeader, Select, Table, Tabs, downloadCsv, useAction, useAsync, linkBtn, linkList } from '../../components/ui';
 
 export default function Attendance() {
   const { role } = useCtx();
@@ -29,11 +29,14 @@ function AdminAttendance() {
   );
 }
 
+const STATUS_BTN = 'min-h-[34px] cursor-pointer border-0 border-r border-line bg-card px-[13px] py-[7px] text-xs font-medium text-muted last:border-r-0 aria-pressed:font-bold phone:min-h-11';
+const STATUS_ON = { PRESENT: 'aria-pressed:bg-ok-soft aria-pressed:text-ok', ABSENT: 'aria-pressed:bg-bad-soft aria-pressed:text-bad', LEAVE: 'aria-pressed:bg-warn-soft aria-pressed:text-warn' };
+
 function StatusButtons({ value, onChange }) {
   return (
-    <div className="status-group" role="group">
+    <div className="inline-flex overflow-hidden rounded-[7px] border border-field" role="group">
       {STATUSES.map((s) => (
-        <button key={s} type="button" className={s} aria-pressed={value === s} onClick={() => onChange(s)}>
+        <button key={s} type="button" className={`${STATUS_BTN} ${STATUS_ON[s]}`} aria-pressed={value === s} onClick={() => onChange(s)}>
           {s[0] + s.slice(1).toLowerCase()}
         </button>
       ))}
@@ -57,7 +60,7 @@ function ClassRegister() {
   return (
     <>
       <Alert kind="error">{assignments.error?.message}</Alert>
-      <div className="row mb">
+      <div className="row mb-3">
         <Select label="Class" value={assignmentId} onChange={setAssignmentId}
           options={assignments.data.map((x) => ({ value: x.id, label: x.subjectName }))} />
         <Input label="Date" type="date" max={today()} value={date} onChange={setDate} />
@@ -154,7 +157,7 @@ function Register({ a, date, period, ctx }) {
               { key: 'saved', label: '', render: (s) => earlier(s) && <Badge>saved</Badge> },
             ]}
           />
-          <div className="row mt">
+          <div className="row mt-3">
             <Button variant="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save attendance'}</Button>
           </div>
         </>
@@ -191,7 +194,7 @@ function FacultyRegister() {
 
   return (
     <>
-      <div className="row mb">
+      <div className="row mb-3">
         <Input label="Date" type="date" max={today()} value={date} onChange={(v) => { setDate(v); setPicked({}); }} />
       </div>
       <Alert kind="error">{error?.message || err}</Alert>
@@ -208,7 +211,7 @@ function FacultyRegister() {
               ) },
             ]}
           />
-          <div className="row mt">
+          <div className="row mt-3">
             <Button variant="primary" disabled={busy || !Object.keys(picked).length} onClick={save}>Save faculty attendance</Button>
           </div>
         </>
@@ -253,22 +256,22 @@ function StudentLookup() {
 
   return (
     <>
-      <form className="row mb" onSubmit={go}>
+      <form className="row mb-3" onSubmit={go}>
         <Input label="Student name or enrollment number" value={text} onChange={setText} />
         <Button variant="primary" type="submit" disabled={search.busy || !text.trim()}>{search.busy ? 'Searching…' : 'Search'}</Button>
       </form>
       <Alert kind="error">{search.error || report.error?.message}</Alert>
       {found && !student && (found.length === 0 ? <p className="muted">No student found for “{text.trim()}”. Names are matched from the start.</p> : (
-        <ul className="results" style={{ marginBottom: 16 }}>
-          {found.map((s) => <li key={s.id}><button type="button" className="link" onClick={() => setStudent(s)}>{s.name} <span className="muted">{s.enrollmentNumber}</span></button></li>)}
+        <ul className={linkList} style={{ marginBottom: 16 }}>
+          {found.map((s) => <li key={s.id}><button type="button" className={linkBtn} onClick={() => setStudent(s)}>{s.name} <span className="muted">{s.enrollmentNumber}</span></button></li>)}
         </ul>
       ))}
       {student && (
         <>
-          <div className="row mb">
+          <div className="row mb-3">
             <div className="card" style={{ marginBottom: 0, flex: 1, minWidth: 220 }}>
               <strong>{student.name}</strong> <span className="muted">{student.enrollmentNumber}</span>
-              <div className="stat">{overall === null ? '—' : `${overall}%`}</div><div className="stat-label">Overall attendance</div>
+              <div className="text-4xl leading-[1.1] font-semibold tracking-[-1px] tabular-nums">{overall === null ? '—' : `${overall}%`}</div><div className="mt-2 text-xs font-medium text-muted">Overall attendance</div>
             </div>
             <Input label="From" type="date" value={from} onChange={setFrom} />
             <Input label="To" type="date" value={to} onChange={setTo} />
@@ -326,7 +329,7 @@ function Reports() {
 
   return (
     <>
-      <div className="row mb">
+      <div className="row mb-3">
         <Select label="Class (subject and section)" value={assignmentId} onChange={setAssignmentId}
           options={(assignments.data ?? []).map((a) => ({ value: a.id, label: `${a.subjectName} — ${a.facultyName}${a.active ? '' : ' (ended)'}` }))} />
         <Input label="From" type="date" value={from} onChange={setFrom} />
@@ -378,7 +381,7 @@ function MyAttendance() {
   if (current) {
     return (
       <>
-        <Button className="mb" onClick={() => setOpen(null)}><ArrowLeft size={16} aria-hidden="true" /> All subjects</Button>
+        <Button className="mb-3" onClick={() => setOpen(null)}><ArrowLeft size={16} aria-hidden="true" /> All subjects</Button>
         <div className="card">
           <h2>{current.subject}</h2>
           <p className="muted">
@@ -401,17 +404,17 @@ function MyAttendance() {
 
   return (
     <>
-      <div className="card"><div className="stat">{overall === null ? '—' : `${overall}%`}</div><div className="stat-label">Overall</div></div>
+      <div className="card"><div className="text-4xl leading-[1.1] font-semibold tracking-[-1px] tabular-nums">{overall === null ? '—' : `${overall}%`}</div><div className="mt-2 text-xs font-medium text-muted">Overall</div></div>
       {!data.length && <p className="muted">No attendance recorded yet.</p>}
-      <div className="subjects">
+      <div className="mb-[18px] grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
         {data.map((r) => {
           const low = r.percent !== null && r.percent < 75;
           return (
-            <button type="button" key={r.id} className="card subject-card" onClick={() => setOpen(r.id)}
+            <button type="button" key={r.id} className="card group m-0 grid w-full cursor-pointer gap-2.5 text-left font-[inherit] text-ink hover:border-brand" onClick={() => setOpen(r.id)}
               aria-label={`${r.subject}, ${r.percent === null ? 'no percentage yet' : `${r.percent} percent`}. Show date by date`}>
-              <span className="subject-top"><strong>{r.subject}</strong><ChevronRight size={18} aria-hidden="true" /></span>
-              <span className={`subject-pct${low ? ' low' : ''}`}>{r.percent === null ? '—' : `${r.percent}%`}</span>
-              <span className={`subject-bar${low ? ' low' : ''}`} aria-hidden="true"><i style={{ width: `${r.percent ?? 0}%` }} /></span>
+              <span className="flex items-center justify-between gap-2 text-muted group-hover:text-brand"><strong className="text-[15px] text-ink [overflow-wrap:anywhere]">{r.subject}</strong><ChevronRight size={18} aria-hidden="true" /></span>
+              <span className={`text-[32px] leading-none font-[650] tracking-[-1px] tabular-nums ${low ? 'text-bad' : 'text-ok'}`}>{r.percent === null ? '—' : `${r.percent}%`}</span>
+              <span className="h-1.5 overflow-hidden rounded-full bg-line" aria-hidden="true"><i className={`block h-full rounded-full ${low ? 'bg-bad' : 'bg-ok'}`} style={{ width: `${r.percent ?? 0}%` }} /></span>
               <span className="muted">{r.present} present · {r.absent} absent · {r.leave} leave</span>
             </button>
           );

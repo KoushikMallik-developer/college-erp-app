@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
-import { todayIn } from '../lib/calc';
+import { nowIn, todayIn } from '../lib/calc';
 
 const Ctx = createContext(null);
 export const useCtx = () => useContext(Ctx);
@@ -50,6 +50,7 @@ export function AuthProvider({ children }) {
       role: profile?.role,
       iid: profile?.institutionId,
       today: () => todayIn(tz),
+      now: () => nowIn(tz),
       logout: () => signOut(auth),
     };
   }, [state]);

@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom';
 import { useCtx } from '../../app/AuthProvider';
 import BrandMark from '../../components/BrandMark';
 import { ThemeToggle } from '../../components/widgets';
-import './landing.css';
 
 const CONTACT = import.meta.env.VITE_CONTACT_EMAIL;
 
@@ -66,31 +65,46 @@ const TRUST = [
   'Every correction to attendance or marks is logged.',
 ];
 
+// Class strings the page repeats. Pairs that fight over one property (a size, a look) are kept apart so the result never depends on stylesheet order.
+const WRAP = 'mx-auto w-[min(1120px,100%_-_2.5rem)]';
+const SECTION = 'py-[5.5rem] tiny:py-14';
+const CARD = 'rounded-md border border-line bg-card p-[1.6rem] motion-safe:transition duration-200 hover:-translate-y-[3px] hover:border-brand hover:shadow-[0_18px_36px_-22px_var(--shade)]';
+const H2 = 'text-[clamp(1.8rem,3.4vw,2.7rem)]';
+const SUB = 'mt-4 max-w-[38rem] text-[1.1rem] leading-[1.6]';
+const BTN = 'inline-flex items-center justify-center rounded-full border-[1.5px] font-semibold no-underline motion-safe:transition duration-150';
+const BTN_SIZE = { false: 'min-h-12 px-[1.4rem] py-[.6rem]', true: 'min-h-10 px-[1.1rem] py-[.35rem]' };
+const BTN_LOOK = {
+  solid: 'border-transparent bg-brand text-brand-ink shadow-[0_8px_20px_-8px_var(--glow)] hover:-translate-y-px hover:shadow-[0_12px_26px_-8px_var(--glow)]',
+  ghost: 'border-line bg-transparent text-ink hover:border-ink hover:bg-soft',
+};
+const btn = (look, small = false) => `${BTN} ${BTN_SIZE[small]} ${BTN_LOOK[look]}`;
+const CHIP = { P: 'bg-ok-soft text-ok', A: 'bg-bad-soft text-bad', L: 'bg-warn-soft text-warn' };
+
 function Register() {
   const rows = [['Aarav', 'P'], ['Diya', 'P'], ['Kabir', 'A'], ['Meera', 'L']];
   return (
-    <div className="lp-mock" role="img" aria-label="Illustration: a class attendance register and a published result card, with sample data">
-      <div className="lp-card lp-register" aria-hidden="true">
-        <div className="lp-card-head">
+    <div className="relative pt-4 pb-36 motion-safe:animate-rise [animation-delay:.2s] tiny:pb-4" role="img" aria-label="Illustration: a class attendance register and a published result card, with sample data">
+      <div className="ml-auto max-w-[26rem] rounded-lg border border-line bg-card px-[1.2rem] pt-[1.1rem] pb-[1.2rem] shadow-[0_30px_60px_-28px_var(--shade),0_4px_10px_var(--shade)] narrow:mx-auto" aria-hidden="true">
+        <div className="flex justify-between gap-4 border-b border-line pb-[.8rem] text-[.9rem]">
           <strong>Mathematics</strong>
-          <span>Section A · Period 2</span>
+          <span className="text-muted">Section A · Period 2</span>
         </div>
         {rows.map(([name, status]) => (
-          <div className="lp-row" key={name}>
-            <span className="lp-avatar">{name[0]}</span>
-            <span className="lp-name">{name}</span>
-            <span className={`lp-chip lp-${status}`}>{{ P: 'Present', A: 'Absent', L: 'Leave' }[status]}</span>
+          <div className="flex items-center gap-3 border-b border-line py-[.65rem]" key={name}>
+            <span className="grid size-[34px] place-items-center rounded-full bg-brand-soft font-bold text-brand-deep">{name[0]}</span>
+            <span className="flex-1 font-medium">{name}</span>
+            <span className={`rounded-full px-[.7rem] py-1 text-[.8rem] font-semibold ${CHIP[status]}`}>{{ P: 'Present', A: 'Absent', L: 'Leave' }[status]}</span>
           </div>
         ))}
-        <div className="lp-save">Save attendance</div>
+        <div className="mt-4 rounded-full bg-brand p-[.7rem] text-center font-semibold text-brand-ink">Save attendance</div>
       </div>
-      <div className="lp-card lp-result" aria-hidden="true">
-        <span className="lp-pill">Published</span>
-        <div className="lp-big">78%</div>
-        <div className="lp-small">Mid-term · Pass</div>
-        <div className="lp-bar"><span /></div>
+      <div className="absolute bottom-[.6rem] -left-[1.2rem] w-[11.5rem] rounded-lg border border-line bg-card px-[1.1rem] py-4 shadow-[0_30px_60px_-28px_var(--shade),0_4px_10px_var(--shade)] motion-safe:animate-float narrow:left-0 tiny:static tiny:mx-auto tiny:mt-4 tiny:animate-none" aria-hidden="true">
+        <span className="inline-block rounded-full bg-ok-soft px-[.6rem] py-[.2rem] text-xs font-semibold text-ok">Published</span>
+        <div className="mt-[.4rem] text-[2.4rem] font-bold tracking-[-0.03em]">78%</div>
+        <div className="text-[.85rem] text-muted">Mid-term · Pass</div>
+        <div className="mt-[.7rem] h-2 overflow-hidden rounded-full bg-line"><span className="block h-full w-[78%] bg-ok" /></div>
       </div>
-      <p className="lp-sample" aria-hidden="true">Sample data</p>
+      <p className="absolute right-0 bottom-0 text-xs text-muted tiny:static tiny:mt-2 tiny:text-center" aria-hidden="true">Sample data</p>
     </div>
   );
 }
@@ -98,39 +112,40 @@ function Register() {
 export default function Landing() {
   const ctx = useCtx();
   const [to, label] = ctx?.user && ctx?.profile ? ['/dashboard', 'Open dashboard'] : ['/login', 'Sign in'];
+  const navLink = 'py-2 font-medium text-muted no-underline hover:text-brand';
   return (
-    <div className="lp">
-      <a className="lp-skip" href="#main">Skip to content</a>
-      <header className="lp-nav">
-        <div className="lp-wrap lp-nav-in">
-          <Link to="/" className="lp-brand"><BrandMark size={30} /> Techomato Colleges</Link>
-          <nav aria-label="Page sections" className="lp-links">
-            <a href="#features">Features</a>
-            <a href="#how">How it works</a>
-            <a href="#roles">Who it is for</a>
+    <div className="lp bg-page font-sans text-ink">
+      <a className="absolute top-0 -left-[999px] z-(--z-skip) rounded-br-[8px] bg-brand px-4 py-[.6rem] text-brand-ink focus:left-0" href="#main">Skip to content</a>
+      <header className="sticky top-0 z-(--z-topbar) border-b border-line bg-page/88 backdrop-blur-[10px]">
+        <div className={`${WRAP} flex min-h-16 items-center gap-6`}>
+          <Link to="/" className="mr-auto flex items-center gap-[.6rem] text-[1.1rem] font-extrabold tracking-[-.02em] no-underline tiny:text-[.95rem]"><BrandMark size={30} /> Techomato Colleges</Link>
+          <nav aria-label="Page sections" className="flex gap-6 narrow:hidden">
+            <a className={navLink} href="#features">Features</a>
+            <a className={navLink} href="#how">How it works</a>
+            <a className={navLink} href="#roles">Who it is for</a>
           </nav>
           <ThemeToggle />
-          <Link to={to} className="lp-btn lp-btn-solid lp-btn-sm">{label}</Link>
+          <Link to={to} className={btn('solid', true)}>{label}</Link>
         </div>
       </header>
 
       <main id="main">
-        <section className="lp-hero">
-          <div className="lp-wrap lp-hero-in">
-            <div className="lp-copy">
-              <p className="lp-eyebrow">College management, without the spreadsheets</p>
-              <h1>One calm place to run your <em>whole college</em>.</h1>
-              <p className="lp-lead">
+        <section className="relative overflow-hidden bg-page bg-[radial-gradient(60rem_28rem_at_85%_-10%,var(--brand-soft)_0%,transparent_60%),radial-gradient(40rem_24rem_at_-5%_20%,var(--soft)_0%,transparent_60%)] pt-20 pb-18 before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(var(--line)_1px,transparent_1px),linear-gradient(90deg,var(--line)_1px,transparent_1px)] before:bg-[length:48px_48px] before:opacity-50 before:[mask-image:radial-gradient(ellipse_at_70%_30%,var(--black)_0%,transparent_70%)] before:content-[''] tiny:py-12">
+          <div className={`${WRAP} relative grid grid-cols-[1.05fr_.95fr] items-center gap-12 narrow:grid-cols-1`}>
+            <div className="[&>*]:motion-safe:animate-rise [&>:nth-child(2)]:[animation-delay:.08s] [&>:nth-child(3)]:[animation-delay:.16s] [&>:nth-child(4)]:[animation-delay:.24s] [&>:nth-child(5)]:[animation-delay:.32s]">
+              <p className="mb-5 inline-block rounded-full bg-brand-soft px-[.8rem] py-[.35rem] text-[.85rem] font-semibold text-brand-deep">College management, without the spreadsheets</p>
+              <h1 className="text-[clamp(2.4rem,5.2vw,4rem)]">One calm place to run your <em className="text-brand not-italic">whole college</em>.</h1>
+              <p className="mt-[1.4rem] max-w-[34rem] text-[1.15rem] leading-[1.65] text-muted">
                 Attendance, timetables, exams, results and class notes for every teacher, student and admin. Built to
                 replace paper registers and scattered files, and simple enough to use on day one.
               </p>
-              <div className="lp-cta">
-                <Link to={to} className="lp-btn lp-btn-solid">{ctx?.user && ctx?.profile ? label : 'Sign in to your college'}</Link>
+              <div className="mt-8 flex flex-wrap gap-[.8rem] tiny:[&>a]:w-full">
+                <Link to={to} className={btn('solid')}>{ctx?.user && ctx?.profile ? label : 'Sign in to your college'}</Link>
                 {CONTACT
-                  ? <a href={`mailto:${CONTACT}`} className="lp-btn lp-btn-ghost">Contact us</a>
-                  : <a href="#features" className="lp-btn lp-btn-ghost">See what it does</a>}
+                  ? <a href={`mailto:${CONTACT}`} className={btn('ghost')}>Contact us</a>
+                  : <a href="#features" className={btn('ghost')}>See what it does</a>}
               </div>
-              <ul className="lp-points">
+              <ul className="mt-[1.8rem] flex flex-wrap gap-x-[1.6rem] gap-y-2 text-[.95rem] text-muted [&>li]:before:mr-[.55rem] [&>li]:before:inline-block [&>li]:before:size-2 [&>li]:before:rounded-full [&>li]:before:bg-ok [&>li]:before:content-['']">
                 <li>Works on a phone, tablet or computer</li>
                 <li>Each college's data stays separate</li>
               </ul>
@@ -139,61 +154,61 @@ export default function Landing() {
           </div>
         </section>
 
-        <section id="features" className="lp-section">
-          <div className="lp-wrap">
-            <h2>Everything a college runs on, in one system</h2>
-            <p className="lp-sub">Six things that take the most time every week, done properly.</p>
-            <ul className="lp-grid">
+        <section id="features" className={SECTION}>
+          <div className={WRAP}>
+            <h2 className={`${H2} text-center`}>Everything a college runs on, in one system</h2>
+            <p className={`${SUB} mx-auto text-center text-muted`}>Six things that take the most time every week, done properly.</p>
+            <ul className="mt-12 grid grid-cols-3 gap-5 narrow:grid-cols-2 tiny:grid-cols-1">
               {FEATURES.map((f) => (
-                <li className="lp-feature" key={f.title}>
-                  <span className="lp-icon"><Icon>{f.icon}</Icon></span>
-                  <h3>{f.title}</h3>
-                  <p>{f.text}</p>
+                <li className={CARD} key={f.title}>
+                  <span className="mb-4 grid size-12 place-items-center rounded-[14px] bg-brand-soft text-brand-deep"><Icon>{f.icon}</Icon></span>
+                  <h3 className="mb-2 text-[1.15rem]">{f.title}</h3>
+                  <p className="leading-[1.6] text-muted">{f.text}</p>
                 </li>
               ))}
             </ul>
           </div>
         </section>
 
-        <section id="how" className="lp-section lp-tint">
-          <div className="lp-wrap">
-            <h2>Up and running in three steps</h2>
-            <ol className="lp-steps">
+        <section id="how" className={`${SECTION} bg-soft`}>
+          <div className={WRAP}>
+            <h2 className={`${H2} text-center`}>Up and running in three steps</h2>
+            <ol className="mt-12 grid grid-cols-3 gap-8 narrow:grid-cols-1">
               {STEPS.map(([title, text], i) => (
-                <li key={title}>
-                  <span className="lp-num" aria-hidden="true">{i + 1}</span>
-                  <h3>{title}</h3>
-                  <p>{text}</p>
+                <li className="relative pt-4" key={title}>
+                  <span className="mb-4 grid size-11 place-items-center rounded-full bg-brand font-bold text-brand-ink" aria-hidden="true">{i + 1}</span>
+                  <h3 className="mb-2 text-[1.2rem]">{title}</h3>
+                  <p className="leading-[1.6] text-muted">{text}</p>
                 </li>
               ))}
             </ol>
           </div>
         </section>
 
-        <section id="roles" className="lp-section">
-          <div className="lp-wrap">
-            <h2>Made for the people who use it every day</h2>
-            <ul className="lp-grid lp-grid-3">
+        <section id="roles" className={SECTION}>
+          <div className={WRAP}>
+            <h2 className={`${H2} text-center`}>Made for the people who use it every day</h2>
+            <ul className="mt-10 grid grid-cols-3 gap-5 narrow:grid-cols-2 tiny:grid-cols-1">
               {ROLES.map(([title, text]) => (
-                <li className="lp-role" key={title}>
-                  <h3>{title}</h3>
-                  <p>{text}</p>
+                <li className={CARD} key={title}>
+                  <h3 className="mb-2 text-[1.15rem]">{title}</h3>
+                  <p className="leading-[1.6] text-muted">{text}</p>
                 </li>
               ))}
             </ul>
           </div>
         </section>
 
-        <section className="lp-section lp-dark">
-          <div className="lp-wrap lp-trust">
+        <section className={`${SECTION} bg-panel bg-[radial-gradient(40rem_20rem_at_90%_0%,var(--glow)_0%,transparent_60%)] text-panel-text`}>
+          <div className={`${WRAP} grid grid-cols-2 items-center gap-12 narrow:grid-cols-1`}>
             <div>
-              <h2>Careful with what matters</h2>
-              <p className="lp-sub">Marks and attendance decide real outcomes. The system is built so that mistakes are hard to make and easy to trace.</p>
+              <h2 className={H2}>Careful with what matters</h2>
+              <p className={`${SUB} text-panel-muted`}>Marks and attendance decide real outcomes. The system is built so that mistakes are hard to make and easy to trace.</p>
             </div>
-            <ul className="lp-checks">
+            <ul className="grid gap-[.9rem]">
               {TRUST.map((t) => (
-                <li key={t}>
-                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+                <li className="flex items-start gap-[.8rem] rounded-[14px] border border-white/12 bg-white/7 px-[1.2rem] py-4 font-medium" key={t}>
+                  <svg className="mt-px flex-none text-green-300" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
                   {t}
                 </li>
               ))}
@@ -201,22 +216,22 @@ export default function Landing() {
           </div>
         </section>
 
-        <section className="lp-section lp-final">
-          <div className="lp-wrap">
-            <h2>Ready when you are</h2>
-            <p className="lp-sub">Your college admin gives you your login. Sign in to get started.</p>
-            <div className="lp-cta lp-center">
-              <Link to={to} className="lp-btn lp-btn-solid">{label}</Link>
-              {CONTACT && <a href={`mailto:${CONTACT}`} className="lp-btn lp-btn-ghost">Contact us</a>}
+        <section className={`${SECTION} bg-[linear-gradient(var(--bg),var(--soft))] text-center`}>
+          <div className={WRAP}>
+            <h2 className={H2}>Ready when you are</h2>
+            <p className={`${SUB} mx-auto text-muted`}>Your college admin gives you your login. Sign in to get started.</p>
+            <div className="mt-8 flex flex-wrap justify-center gap-[.8rem] tiny:[&>a]:w-full">
+              <Link to={to} className={btn('solid')}>{label}</Link>
+              {CONTACT && <a href={`mailto:${CONTACT}`} className={btn('ghost')}>Contact us</a>}
             </div>
           </div>
         </section>
       </main>
 
-      <footer className="lp-foot">
-        <div className="lp-wrap lp-foot-in">
+      <footer className="border-t border-line py-[1.6rem] text-[.95rem] text-muted">
+        <div className={`${WRAP} flex flex-wrap justify-between gap-4`}>
           <span>© {new Date().getFullYear()} Techomato Colleges</span>
-          <Link to={to}>{label}</Link>
+          <Link className="font-semibold text-brand-deep no-underline" to={to}>{label}</Link>
         </div>
       </footer>
     </div>

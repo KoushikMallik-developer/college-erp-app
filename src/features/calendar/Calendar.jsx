@@ -6,7 +6,11 @@ import { db } from '../../lib/firebase';
 import { useCtx } from '../../app/AuthProvider';
 import { isAdminRole, tcol, tdoc } from '../../lib/tenant';
 import { list } from '../../lib/data';
-import { Alert, Badge, Button, Input, Loading, Modal, PageHeader, Select, Textarea, useAction, useAsync, useConfirm, useForm } from '../../components/ui';
+import { Alert, Badge, Button, Input, Loading, Modal, PageHeader, Select, Textarea, useAction, useAsync, useConfirm, useForm, agendaDate, agendaList, checkCls, linkBtn } from '../../components/ui';
+
+const CAL_DAY = 'flex min-h-[92px] min-w-0 flex-col gap-[3px] rounded-sm border p-1.5 phone:min-h-16 phone:p-[3px]';
+const CHIP = 'block w-full cursor-pointer truncate rounded-[5px] border-0 px-1.5 py-0.5 text-left text-[11px] leading-[1.3] font-semibold phone:px-[3px] phone:py-px';
+const CHIP_LOOK = { HOLIDAY: 'bg-bad-soft text-bad', EXAM: 'bg-warn-soft text-warn', EVENT: 'bg-ok-soft text-ok' };
 
 const TYPES = [['HOLIDAY', 'Holiday'], ['EXAM', 'Exam'], ['EVENT', 'Event'], ['OTHER', 'Other']];
 const TYPE_NAME = Object.fromEntries(TYPES);
@@ -53,24 +57,24 @@ export default function Calendar() {
       </PageHeader>
       <Alert kind="error">{error?.message || action.error}</Alert>
       <Alert kind="ok">{action.done}</Alert>
-      <div className="cal-head">
+      <div className="mb-3.5 flex items-center gap-2.5">
         <Button small onClick={() => shift(-1)} aria-label="Previous month">‹</Button>
-        <h2>{title}</h2>
+        <h2 className="mx-2 my-0 min-w-44 text-center">{title}</h2>
         <Button small onClick={() => shift(1)} aria-label="Next month">›</Button>
         <Button small onClick={() => { const [y, m] = today().split('-').map(Number); setMonth(new Date(y, m - 1, 1)); }}>Today</Button>
       </div>
       {loading ? <Loading /> : (
         <>
-          <div className="cal">
-            {WEEKDAYS.map((w) => <div className="cal-wd" key={w}>{w}</div>)}
+          <div className="mb-4 grid grid-cols-7 gap-1.5">
+            {WEEKDAYS.map((w) => <div className="py-1.5 text-center text-[11px] font-semibold tracking-[.5px] text-muted uppercase" key={w}>{w}</div>)}
             {cells.map((date, i) => {
-              if (!date) return <div className="cal-day empty" key={`b${i}`} />;
+              if (!date) return <div className={`${CAL_DAY} border-transparent bg-transparent`} key={`b${i}`} />;
               const events = on(date);
               return (
-                <div className={`cal-day${date === today() ? ' today' : ''}`} key={date}>
-                  <span className="cal-n">{Number(date.slice(8))}</span>
-                  {events.slice(0, 2).map((e) => <button type="button" className={`chip ${e.type}`} key={e.id} onClick={() => setOpen(e)}>{e.title}</button>)}
-                  {events.length > 2 && <button type="button" className="chip more" onClick={() => setDay(date)}>+{events.length - 2} more</button>}
+                <div className={`${CAL_DAY} ${date === today() ? 'border-2 border-brand bg-brand-soft' : 'border-line bg-card'}`} key={date}>
+                  <span className={`text-xs font-bold ${date === today() ? 'text-brand' : 'text-muted'}`}>{Number(date.slice(8))}</span>
+                  {events.slice(0, 2).map((e) => <button type="button" className={`${CHIP} ${CHIP_LOOK[e.type] ?? 'bg-soft text-ink'}`} key={e.id} onClick={() => setOpen(e)}>{e.title}</button>)}
+                  {events.length > 2 && <button type="button" className={`${CHIP} bg-transparent text-muted`} onClick={() => setDay(date)}>+{events.length - 2} more</button>}
                 </div>
               );
             })}
@@ -78,11 +82,11 @@ export default function Calendar() {
           <div className="card">
             <h2>This month</h2>
             {data.length === 0 ? <p className="muted">Nothing planned this month.</p> : (
-              <ul className="agenda">
+              <ul className={agendaList}>
                 {data.map((e) => (
                   <li key={e.id}>
-                    <span className="agenda-date">{span(e)}</span>
-                    <button type="button" className="link" onClick={() => setOpen(e)}>{e.title}</button>
+                    <span className={agendaDate}>{span(e)}</span>
+                    <button type="button" className={linkBtn} onClick={() => setOpen(e)}>{e.title}</button>
                     <Badge kind={e.type === 'HOLIDAY' ? 'bad' : e.type === 'EXAM' ? 'warn' : e.type === 'EVENT' ? 'ok' : ''}>{TYPE_NAME[e.type]}</Badge>
                   </li>
                 ))}
@@ -94,7 +98,7 @@ export default function Calendar() {
       {confirm.dialog}
       {day && (
         <Modal title={day} onClose={() => setDay(null)}>
-          <ul className="agenda">{on(day).map((e) => <li key={e.id}><button type="button" className="link" onClick={() => { setDay(null); setOpen(e); }}>{e.title}</button> <Badge>{TYPE_NAME[e.type]}</Badge></li>)}</ul>
+          <ul className={agendaList}>{on(day).map((e) => <li key={e.id}><button type="button" className={linkBtn} onClick={() => { setDay(null); setOpen(e); }}>{e.title}</button> <Badge>{TYPE_NAME[e.type]}</Badge></li>)}</ul>
           <div className="modal-actions"><Button onClick={() => setDay(null)}>Close</Button></div>
         </Modal>
       )}
@@ -127,10 +131,10 @@ function EventDetail({ e, admin, onClose, onEdit, onDelete }) {
   return (
     <Modal title={e.title} onClose={onClose}>
       <p><Badge kind={e.type === 'HOLIDAY' ? 'bad' : e.type === 'EXAM' ? 'warn' : e.type === 'EVENT' ? 'ok' : ''}>{TYPE_NAME[e.type]}</Badge> {span(e)}</p>
-      {e.description && <p className="pre-wrap">{e.description}</p>}
+      {e.description && <p className="whitespace-pre-wrap">{e.description}</p>}
       <Alert kind="error">{action.error}</Alert>
       {e.rsvp && (
-        <div className="card rsvp">
+        <div className="card mt-4 mb-0 bg-soft">
           <p>{mine.data ? 'You are going.' : 'Are you coming?'}</p>
           <Button variant={mine.data ? undefined : 'primary'} disabled={action.busy || mine.loading} onClick={toggle}>{mine.data ? 'I can’t make it' : 'I’m going'}</Button>
           {admin && going.data && <p className="muted">{going.data.length} going{going.data.length ? `: ${going.data.join(', ')}` : ''}</p>}
@@ -176,7 +180,7 @@ function EventForm({ e, onClose }) {
           <Input label="Last day" type="date" required {...bind('endDate')} />
           <Textarea label="Details" maxLength={1000} {...bind('description')} />
         </div>
-        <label className="check">
+        <label className={checkCls}>
           <input type="checkbox" checked={values.rsvp} onChange={(x) => set((s) => ({ ...s, rsvp: x.target.checked }))} />
           Let people say they are going
         </label>
@@ -200,9 +204,9 @@ export function UpcomingEvents({ max = 3 }) {
   return (
     <>
       {data.length === 0 ? <p className="muted">Nothing coming up.</p> : (
-        <ul className="agenda">
+        <ul className={agendaList}>
           {data.map((e) => (
-            <li key={e.id}><span className="agenda-date">{span(e)}</span> {e.title} <Badge>{TYPE_NAME[e.type]}</Badge></li>
+            <li key={e.id}><span className={agendaDate}>{span(e)}</span> {e.title} <Badge>{TYPE_NAME[e.type]}</Badge></li>
           ))}
         </ul>
       )}

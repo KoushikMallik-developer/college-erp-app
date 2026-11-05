@@ -28,7 +28,7 @@ export default function Materials() {
   return (
     <>
       <PageHeader title="Class materials" />
-      <div className="row mb">
+      <div className="row mb-3">
         <Select label="Class" value={assignmentId} onChange={setAssignmentId}
           options={data.map((x) => ({ value: x.id, label: `${x.subjectName} — ${x.facultyName}${x.active ? '' : ' (ended)'}` }))} />
       </div>

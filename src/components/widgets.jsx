@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Moon, Sun } from 'lucide-react';
+import { iconBtn } from './ui';
 
 const systemTheme = () => (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 
@@ -13,7 +14,7 @@ export function ThemeToggle() {
     setTheme(next);
   };
   return (
-    <button type="button" className="icon-btn" onClick={flip} aria-label={theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'}>
+    <button type="button" className={iconBtn} onClick={flip} aria-label={theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'}>
       {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
     </button>
   );
@@ -29,22 +30,24 @@ export function OfflineBanner() {
     window.addEventListener('offline', off);
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
-  return online ? null : <div className="offline" role="status">You are offline. Saving and loading will work again when you reconnect.</div>;
+  return online ? null : <div className="mb-4 rounded-sm border border-warn bg-warn-soft px-3.5 py-2.5 font-semibold text-warn print:hidden" role="status">You are offline. Saving and loading will work again when you reconnect.</div>;
 }
 
 // A progress ring: value 0-100, null while there is nothing to show yet.
+const RING_STROKE = { great: 'stroke-ok', low: 'stroke-bad' };
+
 export function Ring({ value, label }) {
   const r = 52;
   const c = 2 * Math.PI * r;
   const shown = value ?? 0;
   const tone = value === null ? 'none' : value >= 90 ? 'great' : value >= 75 ? 'ok' : 'low';
   return (
-    <div className={`ring ${tone}`} role="img" aria-label={`${label}: ${value === null ? 'no data yet' : `${value} percent`}`}>
-      <svg viewBox="0 0 120 120" aria-hidden="true">
-        <circle cx="60" cy="60" r={r} className="ring-bg" />
-        <circle cx="60" cy="60" r={r} className="ring-fg" strokeDasharray={c} strokeDashoffset={c * (1 - shown / 100)} transform="rotate(-90 60 60)" />
+    <div className="relative size-[140px] flex-none" role="img" aria-label={`${label}: ${value === null ? 'no data yet' : `${value} percent`}`}>
+      <svg className="size-full" viewBox="0 0 120 120" aria-hidden="true">
+        <circle cx="60" cy="60" r={r} className="fill-none stroke-line stroke-12" />
+        <circle cx="60" cy="60" r={r} className={`fill-none stroke-12 [stroke-linecap:round] motion-safe:transition-[stroke-dashoffset] motion-safe:duration-[900ms] motion-safe:ease-[cubic-bezier(.2,.8,.2,1)] ${RING_STROKE[tone] ?? 'stroke-brand'}`} strokeDasharray={c} strokeDashoffset={c * (1 - shown / 100)} transform="rotate(-90 60 60)" />
       </svg>
-      <div className="ring-num">{value === null ? '—' : `${Math.round(value)}%`}</div>
+      <div className="absolute inset-0 grid place-items-center text-[28px] font-semibold tracking-[-1px]">{value === null ? '—' : `${Math.round(value)}%`}</div>
     </div>
   );
 }
@@ -53,7 +56,7 @@ export function Ring({ value, label }) {
 export function Mascot({ size = 64, mood = 'happy' }) {
   const mouth = mood === 'worried' ? 'M12 28c2-2 8-2 10 0' : 'M11.5 25.5c2 3.2 9 3.2 11 0';
   return (
-    <svg className="mascot" width={size} height={size} viewBox="0 0 34 34" aria-hidden="true">
+    <svg className="origin-[50%_90%] motion-safe:animate-wobble" width={size} height={size} viewBox="0 0 34 34" aria-hidden="true">
       <circle cx="17" cy="19" r="14" fill="var(--brand)" />
       <path d="M13 5c2 2 6 2 8 0" stroke="var(--leaf)" strokeWidth="2.4" fill="none" strokeLinecap="round" />
       <circle cx="12.5" cy="17.5" r="1.7" fill="#fff" /><circle cx="21.5" cy="17.5" r="1.7" fill="#fff" />
@@ -65,15 +68,18 @@ export function Mascot({ size = 64, mood = 'happy' }) {
 
 export const greeting = (hour = new Date().getHours()) => (hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening');
 
+// Red under 75%, grey when there is no data, solid for today, a softer brand colour for other days.
+const barColor = (b) => (b.pct !== null && b.pct < 75 ? 'bg-bad' : b.pct === null ? 'bg-line' : b.now ? 'bg-brand' : 'bg-[color-mix(in_srgb,var(--brand)_55%,var(--card))]');
+
 // A bar chart of percentages. items: [{ key, label, pct (null = no data), now?, title? }]
 export function Bars({ items, ariaLabel }) {
   return (
-    <div className="bars" role="img" aria-label={ariaLabel}>
+    <div className="mt-[18px] flex h-[190px] gap-2.5" role="img" aria-label={ariaLabel}>
       {items.map((b) => (
-        <div className="bar-col" key={b.key} title={b.title ?? `${b.label}: ${b.pct === null ? 'no data' : `${b.pct}%`}`}>
-          <span className="bar-val">{b.pct === null ? '' : `${Math.round(b.pct)}%`}</span>
-          <div className="bar-track"><div className={`bar${b.pct === null ? ' none' : ''}${b.now ? ' now' : ''}${b.pct !== null && b.pct < 75 ? ' low' : ''}`} style={{ height: `${b.pct ?? 2}%` }} /></div>
-          <span className="bar-day">{b.label}</span>
+        <div className="flex min-w-0 flex-1 flex-col items-center gap-1.5" key={b.key} title={b.title ?? `${b.label}: ${b.pct === null ? 'no data' : `${b.pct}%`}`}>
+          <span className="h-4 text-[11px] font-semibold tabular-nums">{b.pct === null ? '' : `${Math.round(b.pct)}%`}</span>
+          <div className="flex w-full max-w-10 flex-1 items-end rounded-t-[6px] bg-soft"><div className={`min-h-0.5 w-full rounded-t-[6px] ${barColor(b)}`} style={{ height: `${b.pct ?? 2}%` }} /></div>
+          <span className="max-w-full truncate text-[11px] text-muted">{b.label}</span>
         </div>
       ))}
     </div>

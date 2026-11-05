@@ -46,7 +46,7 @@ function UserList() {
 
   return (
     <>
-      <div className="row mb">
+      <div className="row mb-3">
         {isSuper && <Button variant="primary" onClick={() => setCreating(true)}>Add College Admin</Button>}
       </div>
       <Alert kind="info">This list shows admin accounts. Faculty and student logins are created and deactivated from their own profile pages.</Alert>

@@ -74,7 +74,7 @@ function CreateExam({ onClose }) {
           <Input label="Start date" type="date" required {...bind('startDate')} />
           <Input label="End date" type="date" required {...bind('endDate')} />
         </div>
-        <div className="row mt">
+        <div className="row mt-3">
           <Button variant="primary" type="submit" disabled={busy}>Create</Button>
           <Button onClick={() => onClose(false)}>Cancel</Button>
         </div>
@@ -355,7 +355,7 @@ function MarksEntry() {
   return (
     <>
       <Alert kind="error">{base.error?.message || papers.error?.message}</Alert>
-      <div className="row mb">
+      <div className="row mb-3">
         <Select label="Exam (open for marks)" value={examId} onChange={(v) => { setExamId(v); setPaperId(''); }} options={toOptions(base.data.exams)} />
         <Select label="Paper" value={paperId} onChange={setPaperId} options={mine.map((m) => ({ value: m.paper.id, label: `${m.paper.subjectName} (max ${m.paper.maxMarks})` }))} />
       </div>
@@ -427,12 +427,12 @@ function MarksSheet({ exam, paper, a, ctx }) {
               onChange={(e) => setEdits({ ...edits, [s.studentId]: { ...valueOf(s), marks: e.target.value } })} />
           ) },
           { key: 'absent', label: 'Absent', render: (s) => (
-            <input type="checkbox" aria-label={`${s.studentName} absent`} className="tick" checked={valueOf(s).absent}
+            <input type="checkbox" aria-label={`${s.studentName} absent`} className="min-h-5 w-5" checked={valueOf(s).absent}
               onChange={(e) => setEdits({ ...edits, [s.studentId]: { ...valueOf(s), absent: e.target.checked } })} />
           ) },
         ]}
       />
-      <div className="row mt">
+      <div className="row mt-3">
         <Button variant="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save marks'}</Button>
       </div>
     </div>

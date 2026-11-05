@@ -12,7 +12,7 @@ it('has one main heading, a skip link, a way to sign in, and no empty links', as
   const root = createRoot(el);
   await act(() => root.render(h(MemoryRouter, null, h(Landing))));
   expect(el.querySelectorAll('h1')).toHaveLength(1);
-  expect(el.querySelector('a.lp-skip').getAttribute('href')).toBe('#main');
+  expect(el.querySelector('a[href="#main"]').getAttribute('href')).toBe('#main');
   expect(el.querySelector('main#main')).not.toBeNull();
   const signIn = [...el.querySelectorAll('a')].filter((a) => a.textContent.trim().startsWith('Sign in'));
   expect(signIn.length).toBeGreaterThanOrEqual(2);

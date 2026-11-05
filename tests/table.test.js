@@ -27,7 +27,7 @@ it('shows 25 rows per page and moves to the next page', async () => {
 
 it('sorts a column both ways when its heading is clicked', async () => {
   const el = await mount();
-  const heading = () => [...el.querySelectorAll('.th-sort')].find((b) => b.textContent.startsWith('N') && !b.textContent.startsWith('Na'));
+  const heading = () => [...el.querySelectorAll('th button')].find((b) => b.textContent.startsWith('N') && !b.textContent.startsWith('Na'));
   await act(() => heading().click());
   expect(names(el)[0]).toBe('Name 00');
   await act(() => heading().click());
@@ -37,7 +37,7 @@ it('sorts a column both ways when its heading is clicked', async () => {
 it('plain tables show every row and no controls', async () => {
   const el = await mount({ plain: true });
   expect(names(el)).toHaveLength(30);
-  expect(el.querySelector('.pager, .table-filter, .th-sort')).toBeNull();
+  expect(el.querySelector('select, input[type=search], th button')).toBeNull();
 });
 
 it('a column with render is sorted and filtered by its text(), and ignored without one', async () => {
@@ -47,8 +47,8 @@ it('a column with render is sorted and filtered by its text(), and ignored witho
     { key: 'raw', label: 'Raw', render: (r) => r.name },
   ];
   const el = await mount({ rows: people, columns: cols });
-  expect(el.querySelectorAll('.th-sort')).toHaveLength(1); // only the column with text() can be sorted
-  const filter = el.querySelector('.table-filter');
+  expect(el.querySelectorAll('th button')).toHaveLength(1); // only the column with text() can be sorted
+  const filter = el.querySelector('input[type=search]');
   await act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(filter, 'p07'); filter.dispatchEvent(new Event('input', { bubbles: true })); });
   expect(names(el)).toEqual(['person P07']);
 });
@@ -56,5 +56,5 @@ it('a column with render is sorted and filtered by its text(), and ignored witho
 it('shows no filter box when no column can be searched', async () => {
   const people = Array.from({ length: 12 }, (_, i) => ({ id: String(i), name: `P${i}` }));
   const el = await mount({ rows: people, columns: [{ key: 'name', label: 'Name', render: (r) => r.name }] });
-  expect(el.querySelector('.table-filter')).toBeNull();
+  expect(el.querySelector('input[type=search]')).toBeNull();
 });

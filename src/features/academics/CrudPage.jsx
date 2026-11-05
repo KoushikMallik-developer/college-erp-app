@@ -30,7 +30,7 @@ export default function CrudPage({ config }) {
 
   return (
     <>
-      <div className="row mb">
+      <div className="row mb-3">
         <Button variant="primary" onClick={() => setEditing({})}>Add {config.singular}</Button>
       </div>
       <Table
@@ -110,7 +110,7 @@ function RecordForm({ config, record, lookups, onClose }) {
             ),
           )}
         </div>
-        <div className="row mt">
+        <div className="row mt-3">
           <Button variant="primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
           <Button onClick={() => onClose(false)}>Cancel</Button>
         </div>

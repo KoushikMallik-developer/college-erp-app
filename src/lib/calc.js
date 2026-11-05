@@ -120,6 +120,37 @@ export function todayIn(timeZone, now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone }).format(now);
 }
 
+// Weekday (Mon = 1 ... Sun = 7) and minutes since midnight in the college's time zone.
+export function nowIn(timeZone, now = new Date()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now).map((x) => [x.type, x.value]));
+  return { day: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(p.weekday) + 1, minutes: Number(p.hour) * 60 + Number(p.minute) };
+}
+
+const clockMinutes = (t) => { const [h, m] = t.split(':'); return Number(h) * 60 + Number(m); };
+
+// Which class is on now and which is next, from slots that carry startTime and endTime.
+export function classNow(slots, day, minutes) {
+  const today = slots.filter((s) => s.startTime && s.dayOfWeek === day).sort((a, b) => clockMinutes(a.startTime) - clockMinutes(b.startTime));
+  return {
+    current: today.find((s) => clockMinutes(s.startTime) <= minutes && minutes < clockMinutes(s.endTime)),
+    next: today.find((s) => clockMinutes(s.startTime) > minutes),
+  };
+}
+
+// Messages due right now: 10 minutes before a class, in the first 5 minutes of it, and in the 5 minutes after it ends.
+// The windows are short on purpose: opening the app at 2pm must not replay the morning.
+export function classAlerts(slots, day, minutes) {
+  const out = [];
+  for (const slot of slots) {
+    if (!slot.startTime || slot.dayOfWeek !== day) continue;
+    const from = clockMinutes(slot.startTime), to = clockMinutes(slot.endTime);
+    if (minutes >= from - 10 && minutes < from) out.push({ kind: 'upcoming', slot });
+    if (minutes >= from && minutes < from + 5) out.push({ kind: 'started', slot });
+    if (minutes >= to && minutes < to + 5) out.push({ kind: 'ended', slot });
+  }
+  return out;
+}
+
 // Firebase Auth signs in by email. A bare username such as "admin" maps to a fixed fake address.
 export const loginEmail = (s) => {
   const v = s.trim().toLowerCase();
@@ -167,6 +198,16 @@ function mulberry32(seed) {
 // Greedy placement, repeated with different shuffles; the attempt with the fewest unplaced sessions wins.
 //   requirements: [{ id, facultyId, perWeek }]   rooms: room keys, the first is the section's own room
 //   busy: Set of lock ids already taken (see slotLocks), including this section's own when it is kept
+// The periods that fit between two clock times: periodTimes('09:00', '11:30', 50) -> [['09:00','09:50'], ['09:50','10:40']].
+// A class that would run past the end is not counted. Bad input gives [].
+export function periodTimes(start, end, mins) {
+  const at = (s) => { const m = /^(\d{2}):(\d{2})$/.exec(s ?? ''); return m ? Number(m[1]) * 60 + Number(m[2]) : NaN; };
+  const from = at(start), to = at(end), len = Number(mins);
+  if (!(to > from) || !Number.isInteger(len) || len < 5) return [];
+  const clock = (n) => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
+  return Array.from({ length: Math.floor((to - from) / len) }, (_, i) => [clock(from + i * len), clock(from + (i + 1) * len)]);
+}
+
 // Returns { placements: [{ id, dayOfWeek, period, roomKey }], unplaced: [{ id, missing }] }.
 export function generateTimetable({ sectionId, requirements, days, periods, rooms, busy, attempts = 60 }) {
   const cells = days.flatMap((d) => periods.map((p) => [d, p]));

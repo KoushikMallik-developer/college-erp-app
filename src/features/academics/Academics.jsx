@@ -114,7 +114,7 @@ function Assignments() {
   return (
     <>
       <Alert kind="error">{action.error}</Alert>
-      <div className="row mb">
+      <div className="row mb-3">
         <Button variant="primary" onClick={() => setMode({})}>Assign a teacher</Button>
       </div>
       <Table
@@ -199,7 +199,7 @@ function AssignForm({ data, replace, onClose }) {
           <Select label="Subject" required disabled={!!replace} options={toOptions(data.subjects)} {...bind('subjectId')} />
           <Select label="Section" required disabled={!!replace} options={toOptions(data.sections)} {...bind('sectionId')} />
         </div>
-        <div className="row mt">
+        <div className="row mt-3">
           <Button variant="primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
           <Button onClick={() => onClose(false)}>Cancel</Button>
         </div>

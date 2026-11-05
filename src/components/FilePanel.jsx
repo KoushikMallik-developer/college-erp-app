@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useCtx } from '../app/AuthProvider';
-import { Alert, Badge, Button, Input, Loading, Modal, Table, useAction, useAsync, useConfirm } from './ui';
+import { Alert, Badge, Button, Input, Loading, Modal, Table, useAction, useAsync, useConfirm, fieldCls, hintCls } from './ui';
 import { ACCEPT, MAX_BYTES, downloadFile, listFiles, removeFile, uploadFile } from '../lib/files';
 
 // canUpload: may add files. canRemove(file): may remove a given file.
@@ -20,7 +20,7 @@ export default function FilePanel({ collection, ownerId, kind = 'DOCUMENT', canU
   return (
     <div>
       <Alert kind="error">{error?.message || action.error}</Alert>
-      {canUpload && <div className="row mb"><Button variant="primary" onClick={() => setUploading(true)}>Upload file</Button></div>}
+      {canUpload && <div className="row mb-3"><Button variant="primary" onClick={() => setUploading(true)}>Upload file</Button></div>}
       <Table
         rows={data}
         empty="No files yet."
@@ -64,10 +64,10 @@ function UploadModal({ onUpload, onClose }) {
         <Alert kind="error">{error}</Alert>
         <div className="form-grid">
           <Input label="Title" value={title} onChange={setTitle} hint="Shown in the list" />
-          <label className="field">
+          <label className={fieldCls}>
             <span>File</span>
             <input type="file" accept={ACCEPT.join(',')} ref={input} required />
-            <span className="hint">PDF, JPEG or PNG, up to {Math.round(MAX_BYTES / 1024)} KB. Big photos are shrunk for you.</span>
+            <span className={hintCls}>PDF, JPEG or PNG, up to {Math.round(MAX_BYTES / 1024)} KB. Big photos are shrunk for you.</span>
           </label>
         </div>
         <div className="row">

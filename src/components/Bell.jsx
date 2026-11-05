@@ -7,7 +7,7 @@ import { useCtx } from '../app/AuthProvider';
 import { tcol, tdoc, isAdminRole, ROLES } from '../lib/tenant';
 import { list } from '../lib/data';
 import { stash } from '../lib/stash';
-import { Button, Modal } from './ui';
+import { Button, Modal, iconBtn, linkList } from './ui';
 
 const WEEK = 7 * 24 * 3600 * 1000;
 const count = async (q) => (await getCountFromServer(q)).data().count;
@@ -16,7 +16,7 @@ const sum = (list) => list.reduce((n, x) => n + x.n, 0);
 // A short two-note chime made with the browser's audio, so there is no sound file to ship. Browsers refuse to play
 // before the person has clicked or typed on the page once; then it stays silent instead of throwing.
 let audio;
-function chime() {
+export function chime() {
   try {
     audio ??= new (window.AudioContext || window.webkitAudioContext)();
     audio.resume?.();
@@ -31,7 +31,7 @@ function chime() {
     });
   } catch { /* no audio available */ }
 }
-const soundOn = () => { try { return localStorage.getItem('bellSound') !== 'off'; } catch { return true; } };
+export const soundOn = () => { try { return localStorage.getItem('bellSound') !== 'off'; } catch { return true; } };
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
@@ -140,16 +140,16 @@ export default function Bell() {
 
   return (
     <>
-      <button type="button" className="icon-btn" onClick={() => { setOpen(true); refresh(true); }}
+      <button type="button" className={iconBtn} onClick={() => { setOpen(true); refresh(true); }}
         aria-label={total ? `Notifications, ${total} new` : 'Notifications'}>
         <BellGlyph size={18} />
-        {total > 0 && <span className="bell-count" aria-hidden="true">{total > 9 ? '9+' : total}</span>}
+        {total > 0 && <span className="absolute top-[3px] right-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-card bg-alert px-[5px] text-[11px] font-bold text-white" aria-hidden="true">{total > 9 ? '9+' : total}</span>}
       </button>
       {open && (
         <Modal title="What's new" onClose={() => setOpen(false)}>
           {error && <p className="muted">{error}</p>}
           {!items.length && !error && <p className="muted">You are all caught up.</p>}
-          <ul className="notices">
+          <ul className={linkList}>
             {items.map((item) => (
               <li key={item.to}>
                 <Link to={item.to} onClick={() => visit(item)}>{item.text}</Link>

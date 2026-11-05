@@ -5,7 +5,7 @@ import { limit, query, where } from 'firebase/firestore';
 import { useCtx } from '../app/AuthProvider';
 import { tcol, isAdminRole } from '../lib/tenant';
 import { list } from '../lib/data';
-import { Button, Input, Modal } from './ui';
+import { Button, Input, Modal, linkList } from './ui';
 
 const END = '';
 const upperFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -49,10 +49,10 @@ export default function SearchPalette({ pages }) {
 
   return (
     <>
-      <button type="button" className="search-btn" onClick={() => setOpen(true)} aria-label="Search" aria-keyshortcuts="Control+K">
+      <button type="button" className="inline-flex min-h-10 min-w-[190px] cursor-pointer items-center gap-[9px] rounded-sm border border-field bg-card px-3 text-[12.5px] text-muted hover:border-brand hover:text-ink phone:min-w-0" onClick={() => setOpen(true)} aria-label="Search" aria-keyshortcuts="Control+K">
         <SearchGlyph size={18} />
-        <span>Search</span>
-        <kbd aria-hidden="true">Ctrl K</kbd>
+        <span className="phone:hidden">Search</span>
+        <kbd className="ml-auto rounded-[5px] border border-line px-1.5 py-px font-mono text-[11px] font-medium phone:hidden" aria-hidden="true">Ctrl K</kbd>
       </button>
       {open && <Palette iid={iid} admin={admin} pages={pages} onClose={() => setOpen(false)} />}
     </>
@@ -88,22 +88,22 @@ function Palette({ iid, admin, pages, onClose }) {
         hint={admin ? 'Type a name, or an enrollment number from the start' : undefined} />
       {matchingPages.length > 0 && (
         <>
-          <h3 className="search-h">Pages</h3>
-          <ul className="results">{matchingPages.map(([to, label]) => <li key={to}><Link to={to} onClick={onClose}>{label}</Link></li>)}</ul>
+          <h3 className="mt-4 mb-1.5 text-[11px] font-bold tracking-[1.5px] text-muted uppercase">Pages</h3>
+          <ul className={linkList}>{matchingPages.map(([to, label]) => <li key={to}><Link to={to} onClick={onClose}>{label}</Link></li>)}</ul>
         </>
       )}
       {people.students.length > 0 && (
         <>
-          <h3 className="search-h">Students</h3>
-          <ul className="results">{people.students.map((s) => (
+          <h3 className="mt-4 mb-1.5 text-[11px] font-bold tracking-[1.5px] text-muted uppercase">Students</h3>
+          <ul className={linkList}>{people.students.map((s) => (
             <li key={s.id}><Link to={`/students/${s.id}`} onClick={onClose}>{s.name} <span className="muted">{s.enrollmentNumber}</span></Link></li>
           ))}</ul>
         </>
       )}
       {people.faculty.length > 0 && (
         <>
-          <h3 className="search-h">Faculty</h3>
-          <ul className="results">{people.faculty.map((f) => (
+          <h3 className="mt-4 mb-1.5 text-[11px] font-bold tracking-[1.5px] text-muted uppercase">Faculty</h3>
+          <ul className={linkList}>{people.faculty.map((f) => (
             <li key={f.id}><Link to={`/faculty/${f.id}`} onClick={onClose}>{f.name} <span className="muted">{f.designation}</span></Link></li>
           ))}</ul>
         </>

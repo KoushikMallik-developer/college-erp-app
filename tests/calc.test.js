@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitPromotion, addDays, overdueDays, toCsv, csvEscape, leaveOverlaps, parseCsv, generateTimetable, slotLocks, attendanceBySubject, attendanceEntries, attendanceStreak, checkExam, groupByCost, computeResult, enrollmentKey, percent, planAttendanceWrites, loginEmail, recordKey, roomKey, todayIn, validTimeZone } from '../src/lib/calc';
+import { splitPromotion, addDays, overdueDays, toCsv, csvEscape, leaveOverlaps, parseCsv, classAlerts, classNow, generateTimetable, nowIn, periodTimes, slotLocks, attendanceBySubject, attendanceEntries, attendanceStreak, checkExam, groupByCost, computeResult, enrollmentKey, percent, planAttendanceWrites, loginEmail, recordKey, roomKey, todayIn, validTimeZone } from '../src/lib/calc';
 
 describe('attendance', () => {
   it('excludes leave from the percentage', () => {
@@ -241,5 +241,41 @@ describe('promotion', () => {
     const r = splitPromotion([{ studentId: 'a' }, { studentId: 'b' }], [{ studentId: 'b' }, { studentId: 'z' }]);
     expect(r.move).toEqual([{ studentId: 'a' }]);
     expect(r.skipped).toEqual([{ studentId: 'b' }]);
+  });
+});
+
+describe('periodTimes', () => {
+  it('cuts the day into classes and drops a part that does not fit', () => {
+    expect(periodTimes('09:00', '10:45', 50)).toEqual([['09:00', '09:50'], ['09:50', '10:40']]);
+  });
+  it('gives nothing for an end before the start or a bad length', () => {
+    expect(periodTimes('10:00', '09:00', 45)).toEqual([]);
+    expect(periodTimes('09:00', '16:00', 0)).toEqual([]);
+    expect(periodTimes('', '16:00', 45)).toEqual([]);
+  });
+});
+
+describe('class now and alerts', () => {
+  const slots = [
+    { id: 'a', dayOfWeek: 1, startTime: '09:00', endTime: '09:45', subjectName: 'Maths' },
+    { id: 'b', dayOfWeek: 1, startTime: '09:45', endTime: '10:30', subjectName: 'Physics' },
+    { id: 'c', dayOfWeek: 2, startTime: '09:00', endTime: '09:45', subjectName: 'Tuesday' },
+    { id: 'd', dayOfWeek: 1, subjectName: 'No time' },
+  ];
+  it('finds the class in progress and the next one, only for that day', () => {
+    expect(classNow(slots, 1, 9 * 60 + 50)).toMatchObject({ current: { id: 'b' }, next: undefined });
+    expect(classNow(slots, 1, 8 * 60)).toMatchObject({ current: undefined, next: { id: 'a' } });
+    expect(classNow(slots, 1, 9 * 60 + 45).current.id).toBe('b'); // the end minute belongs to the next class
+  });
+  it('alerts only inside the short windows', () => {
+    const kinds = (m) => classAlerts(slots, 1, m).map((x) => `${x.slot.id}:${x.kind}`);
+    expect(kinds(8 * 60 + 52)).toEqual(['a:upcoming']);
+    expect(kinds(9 * 60 + 2)).toEqual(['a:started']);
+    expect(kinds(9 * 60 + 45)).toEqual(['a:ended', 'b:started']);
+    expect(kinds(14 * 60)).toEqual([]);
+  });
+  it('reads the weekday and clock in the college time zone', () => {
+    // Monday 2026-11-02 23:30 UTC is already Tuesday 05:00 in Kolkata
+    expect(nowIn('Asia/Kolkata', new Date('2026-11-02T23:30:00Z'))).toEqual({ day: 2, minutes: 300 });
   });
 });

@@ -3,9 +3,9 @@ import { doc, query, serverTimestamp, where, writeBatch } from 'firebase/firesto
 import { db } from '../../lib/firebase';
 import { useCtx } from '../../app/AuthProvider';
 import { ROLES, isAdminRole, tcol, tdoc } from '../../lib/tenant';
-import { generateTimetable, roomKey, slotLocks } from '../../lib/calc';
+import { generateTimetable, periodTimes, roomKey, slotLocks } from '../../lib/calc';
 import { byId, chunk, list } from '../../lib/data';
-import { Alert, Button, Input, Loading, Modal, PageHeader, Select, Table, toOptions, useAction, useAsync, useForm } from '../../components/ui';
+import { Alert, Button, Input, Loading, Modal, PageHeader, Select, Table, toOptions, useAction, useAsync, useForm, checkCls } from '../../components/ui';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const PERIODS = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -20,7 +20,13 @@ export default function Timetable() {
   );
 }
 
+// period -> [start, end] taken from the slots that carry a time (older slots have none).
+const timesOf = (slots) => Object.fromEntries(slots.filter((s) => s.startTime).map((s) => [s.period, [s.startTime, s.endTime]]));
+const rowsFor = (slots) => Array.from({ length: Math.max(PERIODS.length, ...slots.map((s) => s.period)) }, (_, i) => i + 1);
+const clock = (t) => (t ? `${t[0]}–${t[1]}` : null);
+
 function Grid({ slots, sections, onPick }) {
+  const times = timesOf(slots);
   const at = (d, p) => slots.filter((s) => s.dayOfWeek === d && s.period === p);
   return (
     <div className="table-wrap">
@@ -29,9 +35,9 @@ function Grid({ slots, sections, onPick }) {
           <tr><th scope="col">Period</th>{DAYS.map((d) => <th key={d} scope="col">{d}</th>)}</tr>
         </thead>
         <tbody>
-          {PERIODS.map((p) => (
+          {rowsFor(slots).map((p) => (
             <tr key={p}>
-              <th scope="row">{p}</th>
+              <th scope="row">{p}{times[p] && <div className="muted">{clock(times[p])}</div>}</th>
               {DAYS.map((_, i) => (
                 <td key={i}>
                   {at(i + 1, p).map((s) => (
@@ -84,13 +90,13 @@ function AdminTimetable() {
   if (sections.loading) return <Loading />;
   return (
     <>
-      <div className="row mb">
+      <div className="row mb-3">
         <Select label="Section" value={sectionId} onChange={setSectionId} options={toOptions(sections.data)} />
         {sectionId && <Button variant="primary" onClick={() => setGenerating(true)}>Generate automatically</Button>}
       </div>
       <Alert kind="error">{slots.error?.message}</Alert>
       {sectionId && !slots.loading && (
-        <Grid slots={slots.data} onPick={(s) => setEditing({ ...s, sectionId })} />
+        <Grid slots={slots.data} onPick={(s) => setEditing({ ...s, sectionId, times: timesOf(slots.data) })} />
       )}
       {generating && (
         <Generate sectionId={sectionId} onClose={(saved) => { setGenerating(false); if (saved) slots.reload(); }} />
@@ -128,6 +134,7 @@ function SlotForm({ slot, onClose }) {
         sectionId: slot.sectionId, subjectId: a.subjectId, subjectName: a.subjectName, facultyId: a.facultyId,
         facultyName: a.facultyName, assignmentId: a.id, dayOfWeek: Number(values.dayOfWeek), period: Number(values.period),
         room: values.room.trim(), roomKey: roomKey(values.room),
+        ...(slot.times[values.period] && { startTime: slot.times[values.period][0], endTime: slot.times[values.period][1] }),
       };
       const slotRef = isNew ? doc(tcol(iid, 'timetableSlots')) : tdoc(iid, 'timetableSlots', slot.id);
       const oldLocks = isNew ? [] : slotLocks(slot);
@@ -186,10 +193,10 @@ function SlotForm({ slot, onClose }) {
           ) : null}
           <Input label="Room" required {...bind('room')} />
           <Select label="Day" required options={DAYS.map((d, i) => ({ value: String(i + 1), label: d }))} {...bind('dayOfWeek')} />
-          <Select label="Period" required options={PERIODS.map((p) => ({ value: String(p), label: String(p) }))} {...bind('period')} />
+          <Select label="Period" required options={rowsFor(Object.keys(slot.times).map((p) => ({ period: Number(p) }))).map((p) => ({ value: String(p), label: String(p) }))} {...bind('period')} />
         </div>
         {assignments.data?.length === 0 && <Alert kind="info">No active teaching assignments for this section yet. Add one under Academics.</Alert>}
-        <div className="row mt">
+        <div className="row mt-3">
           <Button variant="primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
           {!isNew && <Button variant="danger" disabled={busy} onClick={() => setConfirming(true)}>Delete slot</Button>}
           <Button onClick={() => onClose(false)}>Cancel</Button>
@@ -205,7 +212,7 @@ function Generate({ sectionId, onClose }) {
   const assignments = useAsync(
     () => list(query(tcol(iid, 'teachingAssignments'), where('sectionId', '==', sectionId), where('active', '==', true))), [iid, sectionId],
   );
-  const { values, bind, set } = useForm({ rooms: '', periods: '6', days: [1, 2, 3, 4, 5], perWeek: {}, clear: false });
+  const { values, bind, set } = useForm({ rooms: '', start: '09:00', end: '15:00', mins: '45', days: [1, 2, 3, 4, 5], perWeek: {}, clear: false });
   const [plan, setPlan] = useState(null);
   const [progress, setProgress] = useState('');
   const { busy, error, run } = useAction();
@@ -220,6 +227,8 @@ function Generate({ sectionId, onClose }) {
       if (!names.length) throw new Error('Enter at least one room.');
       if (names.some(([key]) => key.includes('/'))) throw new Error('Room names cannot contain "/".');
       if (!values.days.length) throw new Error('Choose at least one day.');
+      const times = periodTimes(values.start, values.end, values.mins);
+      if (!times.length) throw new Error('The college must end after it starts, and a class must be at least 5 minutes and fit in the day.');
       const requirements = assignments.data.map((a) => ({ id: a.id, facultyId: a.facultyId, perWeek: Number(sessions(a)) })).filter((r) => r.perWeek > 0);
       if (!requirements.length) throw new Error('Give at least one subject some classes per week.');
       const keys = names.map(([key]) => key);
@@ -233,9 +242,9 @@ function Generate({ sectionId, onClose }) {
       const all = new Map([...byFaculty.flat(), ...byRoom.flat(), ...own].map((x) => [x.id, x]));
       const kept = [...all.values()].filter((x) => !(values.clear && x.sectionId === sectionId));
       const busy = new Set(kept.flatMap(slotLocks));
-      const periods = Array.from({ length: Number(values.periods) }, (_, i) => i + 1);
+      const periods = times.map((_, i) => i + 1);
       const result = generateTimetable({ sectionId, requirements, days: values.days, periods, rooms: keys, busy });
-      setPlan({ ...result, requirements, kept: kept.filter((x) => x.sectionId === sectionId), roomName: Object.fromEntries(names), remove: values.clear ? own : [], periods });
+      setPlan({ ...result, requirements, kept: kept.filter((x) => x.sectionId === sectionId), roomName: Object.fromEntries(names), remove: values.clear ? own : [], periods, times });
     });
   };
 
@@ -255,6 +264,7 @@ function Generate({ sectionId, onClose }) {
           slot: {
             sectionId, subjectId: a.subjectId, subjectName: a.subjectName, facultyId: a.facultyId, facultyName: a.facultyName,
             assignmentId: a.id, dayOfWeek: pl.dayOfWeek, period: pl.period, room: plan.roomName[pl.roomKey], roomKey: pl.roomKey,
+            startTime: plan.times[pl.period - 1][0], endTime: plan.times[pl.period - 1][1],
           },
         };
       });
@@ -302,7 +312,7 @@ function Generate({ sectionId, onClose }) {
             <tbody>
               {plan.periods.map((p) => (
                 <tr key={p}>
-                  <th scope="row">{p}</th>
+                  <th scope="row">{p}<div className="muted">{clock(plan.times[p - 1])}</div></th>
                   {values.days.map((d) => (
                     <td key={d}>
                       {at(d, p).map((x) => <div key={x.id}><strong>{subject[x.id].subjectName}</strong><div className="muted">{plan.roomName[x.roomKey]}</div></div>)}
@@ -332,16 +342,18 @@ function Generate({ sectionId, onClose }) {
           <Alert kind="info">This section has no active teaching assignments yet. Add them under Academics first.</Alert>
         ) : (
           <>
-            <fieldset className="days">
+            <fieldset className="mx-0 mt-0 mb-3 flex flex-wrap gap-x-4 gap-y-1 border-0 p-0 [&>legend]:mb-1.5 [&>legend]:p-0 [&>legend]:text-[13px] [&>legend]:font-semibold">
               <legend>School days</legend>
               {DAYS.map((name, i) => (
-                <label key={name} className="check">
+                <label key={name} className={checkCls}>
                   <input type="checkbox" checked={values.days.includes(i + 1)} onChange={() => toggleDay(i + 1)} /> {name}
                 </label>
               ))}
             </fieldset>
             <div className="form-grid">
-              <Select label="Periods per day" required options={PERIODS.map((p) => ({ value: String(p), label: String(p) }))} {...bind('periods')} />
+              <Input label="College starts" type="time" required {...bind('start')} />
+              <Input label="College ends" type="time" required {...bind('end')} />
+              <Input label="Minutes per class" type="number" min="5" step="5" required hint={`${periodTimes(values.start, values.end, values.mins).length} classes fit in a day`} {...bind('mins')} />
               <Input label="Rooms" required hint="Separate with commas. The first is this section's own; the others are used when it is taken." {...bind('rooms')} />
             </div>
             <h3>Classes per week</h3>
@@ -359,7 +371,7 @@ function Generate({ sectionId, onClose }) {
                 },
               ]}
             />
-            <label className="check">
+            <label className={checkCls}>
               <input type="checkbox" checked={values.clear} onChange={(e) => set((v) => ({ ...v, clear: e.target.checked }))} />
               Remove this section's current timetable first (otherwise only empty periods are filled)
             </label>

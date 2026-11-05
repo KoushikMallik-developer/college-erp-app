@@ -4,13 +4,14 @@ import { BookOpen, CalendarDays, ClipboardCheck, Clock, FileText, GraduationCap,
 import BrandMark from '../components/BrandMark';
 import { useCtx } from './AuthProvider';
 import LiveProvider from './LiveProvider';
-import { Loading } from '../components/ui';
+import { Loading, Spinner, iconBtn, iconBtnBase } from '../components/ui';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Bell from '../components/Bell';
 import SearchPalette from '../components/SearchPalette';
 import { OfflineBanner, ThemeToggle } from '../components/widgets';
 import { ROLES, isAdminRole } from '../lib/tenant';
 import Login from '../features/auth/Login';
+import { ClassWatcher } from '../features/dashboard/ClassNow';
 const Landing = lazy(() => import('../features/landing/Landing'));
 const Dashboard = lazy(() => import('../features/dashboard/Dashboard'));
 const Colleges = lazy(() => import('../features/platform/Colleges'));
@@ -69,7 +70,11 @@ const NAV_META = {
 };
 
 // Phones get a bottom bar with the first four of these the role can open, plus "More" for the full menu.
+const AVATAR = 'inline-grid size-9 flex-none place-items-center rounded-full border text-xs font-semibold';
 const TABS = { '/dashboard': 'Home', '/attendance': 'Attendance', '/exams': 'Exams', '/requests': 'Requests', '/students': 'Students', '/admins': 'Admins', '/library': 'Library' };
+
+const SIDE_LINK = 'my-0.5 flex items-center gap-[11px] rounded-[7px] px-3 py-2.5 text-[12.5px] font-medium no-underline motion-safe:transition';
+const TAB_LINK = 'grid min-h-14 min-w-0 flex-1 cursor-pointer content-center place-items-center gap-0.5 border-0 bg-transparent text-[11px] font-medium no-underline';
 
 function Shell() {
   const { role, profile, institution, logout } = useCtx();
@@ -91,51 +96,52 @@ function Shell() {
   const initials = profile.displayName.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   const roleName = role.replace('_', ' ').toLowerCase();
   return (
-    <div className={`shell${collapsed ? ' collapsed' : ''}`}>
-      <aside className={`side ${open ? 'open' : ''}`}>
-        <div className="brand"><BrandMark size={36} /><span>Techomato Colleges</span></div>
-        <div className="institution">
-          <span className="institution-symbol">{(institution?.name ?? 'T')[0]}</span>
-          <div><strong>{institution?.name ?? 'Platform'}</strong><small>{roleName}</small></div>
+    <div className="min-h-dvh">
+      <aside className={`fixed inset-y-0 left-0 z-(--z-drawer) flex w-[248px] flex-col bg-panel px-4 pt-7 text-panel-text print:hidden ${collapsed ? 'desk:invisible desk:-translate-x-full' : ''} ${open ? '' : 'phone:-translate-x-full'} motion-safe:phone:transition-transform motion-safe:phone:duration-200`}>
+        <div className="flex items-center gap-[11px] px-3 text-[19px] leading-[1.15] font-bold tracking-[-.6px] text-white"><BrandMark size={36} /><span>Techomato Colleges</span></div>
+        <div className="mt-6 mb-1 flex items-center gap-2.5 rounded-[9px] border border-panel-line bg-panel-2 px-2.5 py-3">
+          <span className="grid size-8 flex-none place-items-center rounded-[7px] border border-panel-edge font-bold text-panel-strong">{(institution?.name ?? 'T')[0]}</span>
+          <div><strong className="block text-xs font-semibold text-panel-strong [overflow-wrap:anywhere]">{institution?.name ?? 'Platform'}</strong><small className="mt-0.5 block text-xs text-panel-muted capitalize">{roleName}</small></div>
         </div>
-        <nav aria-label="Main">
+        <nav aria-label="Main" className="flex-1 overflow-auto pb-5 [scrollbar-color:var(--color-navy-500)_transparent] [scrollbar-width:thin]">
           {nav.map(([to, label], i) => {
             const [NavIcon = LayoutDashboard, group] = NAV_META[to] ?? [];
             const prev = NAV_META[nav[i - 1]?.[0]]?.[1];
             return (
               <div key={to}>
-                {group && group !== prev && <div className="nav-group">{group}</div>}
-                <NavLink to={to} onClick={() => setOpen(false)}><NavIcon size={18} /><span>{label}</span></NavLink>
+                {group && group !== prev && <div className="mx-3 mt-[22px] mb-2 text-[11px] font-bold tracking-[1.5px] text-panel-muted">{group}</div>}
+                <NavLink to={to} onClick={() => setOpen(false)} className={({ isActive }) => `${SIDE_LINK} ${isActive ? 'bg-brand text-white shadow-[0_3px_12px_var(--shade)]' : 'text-panel-text hover:bg-panel-hover hover:text-white'}`}><NavIcon size={18} /><span>{label}</span></NavLink>
               </div>
             );
           })}
         </nav>
-        <div className="who">
-          <span className="avatar">{initials}</span>
-          <div className="who-text"><strong>{profile.displayName}</strong><span>{roleName}</span></div>
-          <button type="button" className="icon-btn" onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
+        <div className="flex items-center gap-2.5 border-t border-panel-line px-2.5 py-4 text-[11px] text-panel-muted">
+          <span className={`${AVATAR} border-panel-line bg-panel-2 text-panel-strong`}>{initials}</span>
+          <div className="min-w-0 flex-1"><strong className="block truncate text-xs font-semibold text-panel-strong">{profile.displayName}</strong><span className="capitalize">{roleName}</span></div>
+          <button type="button" className={`${iconBtnBase} text-panel-text hover:bg-panel-hover hover:text-white`} onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
         </div>
       </aside>
-      <nav className="tabbar" aria-label="Quick links">
+      <nav className="fixed inset-x-0 bottom-0 z-(--z-tabbar) hidden border-t border-line bg-card pb-[env(safe-area-inset-bottom)] phone:flex print:hidden" aria-label="Quick links">
         {tabs.map((to) => {
           const [Glyph = LayoutDashboard] = NAV_META[to] ?? [];
-          return <NavLink key={to} to={to}><Glyph size={20} /><span>{TABS[to]}</span></NavLink>;
+          return <NavLink key={to} to={to} className={({ isActive }) => `${TAB_LINK} ${isActive ? 'font-[650] text-brand-deep' : 'text-muted'}`}><Glyph size={20} /><span className="max-w-full truncate">{TABS[to]}</span></NavLink>;
         })}
-        <button type="button" onClick={() => setOpen(true)} aria-label="More pages"><Menu size={20} /><span>More</span></button>
+        <button type="button" onClick={() => setOpen(true)} aria-label="More pages" className={`${TAB_LINK} text-muted`}><Menu size={20} /><span>More</span></button>
       </nav>
-      {open && <button type="button" className="sidebar-overlay" aria-label="Close navigation" onClick={() => setOpen(false)} />}
-      <div className="app-body">
-      <header className="topbar">
-        <button type="button" className="icon-btn menu-btn" onClick={toggleMenu} aria-label="Toggle navigation" aria-expanded={open || !collapsed}><Menu size={22} /></button>
-        <div className="breadcrumb">Workspace <span>/</span><strong>{current ?? 'Dashboard'}</strong></div>
-        <div className="topbar-right">
+      {open && <button type="button" className="fixed inset-0 z-(--z-overlay) hidden border-0 bg-scrim phone:block print:hidden" aria-label="Close navigation" onClick={() => setOpen(false)} />}
+      <div className={`min-w-0 phone:ml-0 print:ml-0 ${collapsed ? 'desk:ml-0' : 'ml-[248px]'}`}>
+      <header className="sticky top-0 z-(--z-topbar) flex min-h-[72px] items-center justify-between gap-4 border-b border-line bg-card px-8 tablet:px-6 phone:min-h-16 phone:px-3.5 print:hidden">
+        <button type="button" className={iconBtn} onClick={toggleMenu} aria-label="Toggle navigation" aria-expanded={open || !collapsed}><Menu size={22} /></button>
+        <div className="flex gap-3 text-xs whitespace-nowrap text-muted phone:hidden">Workspace <span className="opacity-45">/</span><strong className="font-semibold text-ink">{current ?? 'Dashboard'}</strong></div>
+        <div className="flex items-center gap-2 phone:flex-1 phone:justify-end">
           <SearchPalette pages={nav} />
           <ThemeToggle />
           {!platform && <Bell />}
-          {!admin && !platform && <Link className="user-chip" to="/profile"><span className="avatar">{initials}</span><span><strong>{profile.displayName}</strong><small>{roleName}</small></span></Link>}
+          {!admin && !platform && <Link className="ml-2 flex items-center gap-2.5 border-l border-line pl-4 text-ink no-underline" to="/profile"><span className={`${AVATAR} border-brand/20 bg-brand-soft text-brand-deep`}>{initials}</span><span className="phone:hidden"><strong className="block text-xs font-semibold whitespace-nowrap">{profile.displayName}</strong><small className="block text-xs text-muted capitalize">{roleName}</small></span></Link>}
         </div>
       </header>
-      <main className="main">
+      {(role === ROLES.STUDENT || role === ROLES.FACULTY) && <ClassWatcher />}
+      <main className="mx-auto max-w-[1600px] px-9 pt-8 pb-12 tablet:px-6 tablet:pt-7 tablet:pb-10 phone:px-4 phone:pt-6 phone:pb-22 print:max-w-none print:p-0">
         <OfflineBanner />
         <ErrorBoundary key={pathname} onSignOut={logout}>
         <Suspense fallback={<Loading />}>
@@ -182,11 +188,11 @@ export default function App() {
   // The landing page (/) and sign-in (/login) are public for everyone and never wait for Firebase.
   // Every other address is the app: it waits for sign-in, and a visitor is sent to /login.
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<Spinner />}>
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={signedIn ? <Navigate to="/dashboard" replace /> : <Login />} />
-        <Route path="*" element={loading ? <Loading /> : signedIn ? <LiveProvider><Shell /></LiveProvider> : <Navigate to="/login" replace />} />
+        <Route path="*" element={loading ? <Spinner /> : signedIn ? <LiveProvider><Shell /></LiveProvider> : <Navigate to="/login" replace />} />
       </Routes>
     </Suspense>
   );

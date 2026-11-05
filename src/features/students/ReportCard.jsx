@@ -27,7 +27,7 @@ export default function ReportCard({ student }) {
   const pct = (r) => (r.percent === null ? '—' : <Badge kind={r.percent < 75 ? 'bad' : 'ok'}>{r.percent}%</Badge>);
   return (
     <>
-      <div className="row no-print mb"><Button variant="primary" onClick={() => window.print()}>Print / save as PDF</Button></div>
+      <div className="row mb-3 print:hidden"><Button variant="primary" onClick={() => window.print()}>Print / save as PDF</Button></div>
       <div className="card">
         <p className="muted">{institution?.name}</p>
         <h2>Report card: {student.name}</h2>

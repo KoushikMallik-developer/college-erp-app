@@ -165,7 +165,7 @@ function Review({ r, onClose }) {
     <Modal title={`${KIND[r.kind]} from ${r.studentName ?? r.facultyName}`} onClose={() => onClose(false)}>
       <Alert kind="error">{error}</Alert>
       <p><strong>{r.subject}</strong>{dates(r) && <> · {dates(r)}</>}</p>
-      <p className="pre-wrap">{r.message}</p>
+      <p className="whitespace-pre-wrap">{r.message}</p>
       {pending ? (
         <>
           <Textarea label="Your answer (the student sees this)" maxLength={500} {...bind('response')} />
