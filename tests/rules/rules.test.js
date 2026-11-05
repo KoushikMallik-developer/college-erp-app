@@ -459,6 +459,7 @@ describe('admin clean-up, locks after publish, and the rest of the rules', () =>
     const session = { assignmentId: 'a1', sectionId: 'sec1', subjectId: 'sub1', facultyId: 'f1', date: '2026-10-31', period: 1, presentCount: 1 };
     await assertSucceeds(setDoc(doc(as('fac1'), ...P('c1', 'classSessions', 'a1_2026-10-31_1')), session));
     await assertFails(setDoc(doc(as('fac1'), ...P('c1', 'classSessions', 'wrong-id')), session));
+    await assertFails(setDoc(doc(as('fac1'), ...P('c1', 'classSessions', 'a1_2026-10-31_1')), { ...session, absentCount: -5 }));
     await assertFails(setDoc(doc(as('fac2'), ...P('c1', 'classSessions', 'a1_2026-10-31_1')), { ...session, facultyId: 'f2' }));
   });
 
@@ -945,5 +946,21 @@ describe('automatic timetable saving', () => {
     b.delete(doc(db, ...P('c1', 'timetableSlots', 'g11')));
     await assertSucceeds(b.commit());
     await assertSucceeds(batchOf(as('ca1'), [slot(1, 1, { sectionId: 'secH' })]).commit()); // the teacher is free again
+  });
+});
+
+describe('live-update signal', () => {
+  const touch = (uid, iid = 'c1') => setDoc(doc(as(uid), ...P(iid, 'meta', 'live')), { at: serverTimestamp(), by: uid });
+  it('any active member of the college can read and touch it, nobody else', async () => {
+    await assertSucceeds(touch('stu1'));
+    await assertSucceeds(getDoc(doc(as('fac1'), ...P('c1', 'meta', 'live'))));
+    await assertFails(touch('ca2')); // another college
+    await assertFails(getDoc(doc(as('ca2'), ...P('c1', 'meta', 'live'))));
+  });
+  it('rejects touches that carry data, claim another user, or come within a second of the last one', async () => {
+    await assertFails(setDoc(doc(as('stu1'), ...P('c1', 'meta', 'live')), { at: serverTimestamp(), by: 'stu1', note: 'x' }));
+    await assertFails(setDoc(doc(as('stu1'), ...P('c1', 'meta', 'live')), { at: serverTimestamp(), by: 'ca1' }));
+    await assertSucceeds(touch('stu1'));
+    await assertFails(touch('fac1')); // too soon after the last touch
   });
 });

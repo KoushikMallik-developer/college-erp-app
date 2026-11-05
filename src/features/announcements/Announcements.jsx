@@ -62,7 +62,7 @@ function AdminAnnouncements() {
                 : toggle(a))}>{a.status === 'PUBLISHED' ? 'Archive' : 'Publish again'}</Button>
             </div>
           </div>
-          <p style={{ whiteSpace: 'pre-wrap' }}>{a.body}</p>
+          <p className="pre-wrap">{a.body}</p>
           <p className="muted">For: {a.audienceRoles?.length ? a.audienceRoles.join(', ') : 'everyone'}</p>
         </div>
       ))}
@@ -101,12 +101,12 @@ function Editor({ a, onClose }) {
             <legend>Show to (leave empty for everyone)</legend>
             {AUDIENCES.map((r) => (
               <label key={r} style={{ marginRight: 16 }}>
-                <input type="checkbox" style={{ width: 18, minHeight: 18 }} checked={values.audienceRoles.includes(r)} onChange={() => toggleRole(r)} /> {r.replace('_', ' ').toLowerCase()}
+                <input type="checkbox" className="tick" checked={values.audienceRoles.includes(r)} onChange={() => toggleRole(r)} /> {r.replace('_', ' ').toLowerCase()}
               </label>
             ))}
           </fieldset>
         </div>
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="row mt">
           <Button variant="primary" type="submit" disabled={busy}>Save</Button>
           <Button onClick={() => onClose(false)}>Cancel</Button>
         </div>

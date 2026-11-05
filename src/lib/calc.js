@@ -62,6 +62,18 @@ export function attendanceBySubject(docs) {
   return out;
 }
 
+// The marks of one subject date by date: [{ id, date: 'YYYY-MM-DD', period, status }], newest first. Record keys look like d20261031_2.
+export function attendanceEntries(docs) {
+  const out = [];
+  for (const d of docs) {
+    for (const [key, status] of Object.entries(d.records ?? {})) {
+      const m = /^d(\d{4})(\d{2})(\d{2})_(\d+)$/.exec(key);
+      if (m) out.push({ id: `${d.assignmentId ?? ''}${key}`, date: `${m[1]}-${m[2]}-${m[3]}`, period: Number(m[4]), status });
+    }
+  }
+  return out.sort((a, b) => b.date.localeCompare(a.date) || b.period - a.period);
+}
+
 // papers: [{ marks, absent, maxMarks, passMarks }]. An absent paper counts as 0 and fails.
 export function computeResult(papers) {
   let total = 0;

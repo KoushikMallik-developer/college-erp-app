@@ -35,7 +35,7 @@ export default function Students() {
         <Button onClick={() => downloadCsv('students.csv', toCsv([['Enrollment number', 'Name', 'Email', 'Phone', 'Admission date', 'Status'],
           ...page.rows.map((r) => [r.enrollmentNumber, r.name, r.email, r.phone, r.admissionDate, r.status])]))} disabled={!page.rows.length}>Export CSV</Button>
       </PageHeader>
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row mb">
         <Input label="Search by enrollment number" value={search} onChange={setSearch} />
         <Select
           label="Status" value={status} onChange={setStatus} placeholder="All"
@@ -43,7 +43,7 @@ export default function Students() {
         />
       </div>
       <Alert kind="error">{page.error?.message}</Alert>
-      <Table
+      <Table plain
         rows={page.rows}
         empty={page.loading ? 'Loading…' : 'No students found.'}
         columns={[
@@ -53,7 +53,7 @@ export default function Students() {
           { key: 'status', label: 'Status', render: (s) => <Badge kind={s.status === 'ACTIVE' ? 'ok' : 'bad'}>{s.status}</Badge> },
         ]}
       />
-      {page.more && <div className="row" style={{ marginTop: 12 }}><Button onClick={page.loadMore}>Load more</Button></div>}
+      {page.more && <div className="row mt"><Button onClick={page.loadMore}>Load more</Button></div>}
       {tool === 'import' && <ImportStudents onClose={(saved) => { setTool(null); if (saved) page.reload(); }} />}
       {tool === 'promote' && <Promote onClose={() => setTool(null)} />}
       {creating && <CreateStudent onClose={(saved) => { setCreating(false); if (saved) page.reload(); }} />}
@@ -135,7 +135,7 @@ function CreateStudent({ onClose }) {
           <Select label="Course" required options={toOptions(refs.data?.courses ?? [])} {...bind('courseId')} />
         </div>
         <label style={{ display: 'flex', gap: 8, margin: '12px 0' }}>
-          <input type="checkbox" style={{ width: 20, minHeight: 20 }} checked={values.login} onChange={(e) => bind('login').onChange(e.target.checked)} />
+          <input type="checkbox" className="tick" checked={values.login} onChange={(e) => bind('login').onChange(e.target.checked)} />
           Create a login and email a link to set the password (needs an email)
         </label>
         <div className="row">
@@ -167,7 +167,7 @@ function ImportStudents({ onClose }) {
         <Select label="Course (for every row)" required options={toOptions(refs.data?.courses ?? [])} {...bind('courseId')} />
       </div>
       <label style={{ display: 'flex', gap: 8, margin: '12px 0' }}>
-        <input type="checkbox" style={{ width: 20, minHeight: 20 }} checked={values.login} onChange={(e) => bind('login').onChange(e.target.checked)} />
+        <input type="checkbox" className="tick" checked={values.login} onChange={(e) => bind('login').onChange(e.target.checked)} />
         Create a login for rows that have an email
       </label>
     </ImportCsv>

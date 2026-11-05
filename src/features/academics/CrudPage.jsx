@@ -30,12 +30,12 @@ export default function CrudPage({ config }) {
 
   return (
     <>
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row mb">
         <Button variant="primary" onClick={() => setEditing({})}>Add {config.singular}</Button>
       </div>
       <Table
         rows={data.rows}
-        columns={colFields.map((f) => ({ key: f.name, label: f.label, render: (r) => show(r, f) }))}
+        columns={colFields.map((f) => ({ key: f.name, label: f.label, text: (r) => show(r, f), render: (r) => show(r, f) }))}
         actions={(r) => <Button small onClick={() => setEditing(r)}>Edit</Button>}
       />
       {editing && (
@@ -110,7 +110,7 @@ function RecordForm({ config, record, lookups, onClose }) {
             ),
           )}
         </div>
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="row mt">
           <Button variant="primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
           <Button onClick={() => onClose(false)}>Cancel</Button>
         </div>

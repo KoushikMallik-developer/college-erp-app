@@ -1,11 +1,13 @@
 import { useState } from 'react';
+import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { query, serverTimestamp, where, writeBatch } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useCtx } from '../../app/AuthProvider';
 import { ROLES, tcol, tdoc } from '../../lib/tenant';
 import { audit } from '../../lib/audit';
-import { STATUSES, attendanceBySubject, groupByCost, percent, planAttendanceWrites, recordKey, toCsv } from '../../lib/calc';
+import { STATUSES, attendanceBySubject, attendanceEntries, groupByCost, percent, planAttendanceWrites, recordKey, toCsv } from '../../lib/calc';
 import { byId, chunk, list } from '../../lib/data';
+import { searchPeople } from '../../components/SearchPalette';
 import { Alert, Badge, Button, Input, Loading, PageHeader, Select, Table, Tabs, downloadCsv, useAction, useAsync } from '../../components/ui';
 
 export default function Attendance() {
@@ -21,8 +23,8 @@ function AdminAttendance() {
     <>
       <PageHeader title="Attendance" />
       <Tabs value={tab} onChange={setTab}
-        tabs={[{ value: 'reports', label: 'Class reports' }, { value: 'faculty', label: 'Faculty attendance' }]} />
-      {tab === 'reports' ? <Reports /> : <FacultyRegister />}
+        tabs={[{ value: 'reports', label: 'Class reports' }, { value: 'student', label: 'By student' }, { value: 'faculty', label: 'Faculty attendance' }]} />
+      {tab === 'reports' ? <Reports /> : tab === 'student' ? <StudentLookup /> : <FacultyRegister />}
     </>
   );
 }
@@ -55,7 +57,7 @@ function ClassRegister() {
   return (
     <>
       <Alert kind="error">{assignments.error?.message}</Alert>
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row mb">
         <Select label="Class" value={assignmentId} onChange={setAssignmentId}
           options={assignments.data.map((x) => ({ value: x.id, label: x.subjectName }))} />
         <Input label="Date" type="date" max={today()} value={date} onChange={setDate} />
@@ -143,7 +145,7 @@ function Register({ a, date, period, ctx }) {
             <Button small onClick={() => setPicked(Object.fromEntries(data.roster.map((s) => [s.studentId, 'PRESENT'])))}>All present</Button>
             <span className="muted">Students already marked for this period show "saved". Changing a saved mark is logged.</span>
           </div>
-          <Table
+          <Table plain
             rows={data.roster.map((s) => ({ ...s, id: s.studentId }))}
             columns={[
               { key: 'enrollmentNumber', label: 'Enrollment no.' },
@@ -152,7 +154,7 @@ function Register({ a, date, period, ctx }) {
               { key: 'saved', label: '', render: (s) => earlier(s) && <Badge>saved</Badge> },
             ]}
           />
-          <div className="row" style={{ marginTop: 12 }}>
+          <div className="row mt">
             <Button variant="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save attendance'}</Button>
           </div>
         </>
@@ -189,14 +191,14 @@ function FacultyRegister() {
 
   return (
     <>
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row mb">
         <Input label="Date" type="date" max={today()} value={date} onChange={(v) => { setDate(v); setPicked({}); }} />
       </div>
       <Alert kind="error">{error?.message || err}</Alert>
       <Alert kind="ok">{done}</Alert>
       {loading ? <Loading /> : (
         <>
-          <Table
+          <Table plain
             rows={data.faculty}
             columns={[
               { key: 'name', label: 'Name' },
@@ -206,9 +208,83 @@ function FacultyRegister() {
               ) },
             ]}
           />
-          <div className="row" style={{ marginTop: 12 }}>
+          <div className="row mt">
             <Button variant="primary" disabled={busy || !Object.keys(picked).length} onClick={save}>Save faculty attendance</Button>
           </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// Record keys look like dYYYYMMDD_p.
+function keyInRange(k, from, to) {
+  const d = k.slice(1, 9);
+  const iso = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+  return (!from || iso >= from) && (!to || iso <= to);
+}
+
+// Admin: find one student by name or enrollment number and see their attendance in every subject.
+function StudentLookup() {
+  const { iid } = useCtx();
+  const [text, setText] = useState('');
+  const [found, setFound] = useState(null);
+  const [student, setStudent] = useState(null);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const search = useAction();
+  const report = useAsync(async () => {
+    if (!student) return null;
+    const [docs, subjects] = await Promise.all([
+      list(query(tcol(iid, 'studentAttendance'), where('studentId', '==', student.id))),
+      list(tcol(iid, 'subjects')),
+    ]);
+    return { docs, subjects: byId(subjects) };
+  }, [iid, student?.id]);
+
+  const go = (e) => {
+    e.preventDefault();
+    if (text.trim()) search.run(async () => { setStudent(null); setFound((await searchPeople(iid, text)).students); });
+  };
+  const rows = Object.entries(attendanceBySubject(
+    (report.data?.docs ?? []).map((d) => ({ ...d, records: Object.fromEntries(Object.entries(d.records ?? {}).filter(([k]) => keyInRange(k, from, to))) })),
+  )).map(([id, t]) => ({ id, subject: report.data.subjects[id]?.name ?? id, ...t }));
+  const overall = percent(rows.reduce((n, r) => n + r.present, 0), rows.reduce((n, r) => n + r.absent, 0));
+
+  return (
+    <>
+      <form className="row mb" onSubmit={go}>
+        <Input label="Student name or enrollment number" value={text} onChange={setText} />
+        <Button variant="primary" type="submit" disabled={search.busy || !text.trim()}>{search.busy ? 'Searching…' : 'Search'}</Button>
+      </form>
+      <Alert kind="error">{search.error || report.error?.message}</Alert>
+      {found && !student && (found.length === 0 ? <p className="muted">No student found for “{text.trim()}”. Names are matched from the start.</p> : (
+        <ul className="results" style={{ marginBottom: 16 }}>
+          {found.map((s) => <li key={s.id}><button type="button" className="link" onClick={() => setStudent(s)}>{s.name} <span className="muted">{s.enrollmentNumber}</span></button></li>)}
+        </ul>
+      ))}
+      {student && (
+        <>
+          <div className="row mb">
+            <div className="card" style={{ marginBottom: 0, flex: 1, minWidth: 220 }}>
+              <strong>{student.name}</strong> <span className="muted">{student.enrollmentNumber}</span>
+              <div className="stat">{overall === null ? '—' : `${overall}%`}</div><div className="stat-label">Overall attendance</div>
+            </div>
+            <Input label="From" type="date" value={from} onChange={setFrom} />
+            <Input label="To" type="date" value={to} onChange={setTo} />
+            <Button onClick={() => setStudent(null)}>Change student</Button>
+          </div>
+          {report.loading ? <Loading /> : (
+            <Table
+              rows={rows}
+              empty="No attendance recorded for this student yet."
+              columns={[
+                { key: 'subject', label: 'Subject' }, { key: 'present', label: 'Present' }, { key: 'absent', label: 'Absent' }, { key: 'leave', label: 'Leave' },
+                { key: 'percent', label: '%', render: (r) => (r.percent === null ? '—' : <Badge kind={r.percent < 75 ? 'bad' : 'ok'}>{r.percent}%</Badge>) },
+              ]}
+            />
+          )}
+          <p className="muted">Percentage = present ÷ (present + absent). Leave is not counted.</p>
         </>
       )}
     </>
@@ -232,11 +308,7 @@ function Reports() {
     return { enrollments, docs: byId(docs.map((d) => ({ ...d, id: d.studentId }))) };
   }, [assignmentId]);
 
-  const inRange = (k) => {
-    const d = k.slice(1, 9); // dYYYYMMDD_p
-    const iso = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
-    return (!from || iso >= from) && (!to || iso <= to);
-  };
+  const inRange = (k) => keyInRange(k, from, to);
   const rows = (report.data?.enrollments ?? [])
     .map((e) => {
       const d = report.data.docs[e.studentId];
@@ -254,7 +326,7 @@ function Reports() {
 
   return (
     <>
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row mb">
         <Select label="Class (subject and section)" value={assignmentId} onChange={setAssignmentId}
           options={(assignments.data ?? []).map((a) => ({ value: a.id, label: `${a.subjectName} — ${a.facultyName}${a.active ? '' : ' (ended)'}` }))} />
         <Input label="From" type="date" value={from} onChange={setFrom} />
@@ -279,34 +351,73 @@ function Reports() {
   );
 }
 
+const STATUS_LOOK = { PRESENT: ['ok', 'Present'], ABSENT: ['bad', 'Absent'], LEAVE: ['warn', 'Leave'] };
+const longDate = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+// One card per subject; a click opens that subject's marks date by date.
 function MyAttendance() {
   const { iid, profile } = useCtx();
+  const [open, setOpen] = useState(null);
   const { data, loading, error } = useAsync(async () => {
     const [docs, subjects] = await Promise.all([
       list(query(tcol(iid, 'studentAttendance'), where('studentId', '==', profile.studentId))),
       list(tcol(iid, 'subjects')),
     ]);
     const S = byId(subjects);
-    return Object.entries(attendanceBySubject(docs)).map(([id, t]) => ({ id, subject: S[id]?.name ?? id, ...t }));
+    const mine = {};
+    for (const d of docs) (mine[d.subjectId] ??= []).push(d);
+    return Object.entries(attendanceBySubject(docs)).map(([id, t]) => ({ id, subject: S[id]?.name ?? id, ...t, entries: attendanceEntries(mine[id]) }));
   }, [iid]);
   if (loading) return <Loading />;
   if (error) return <Alert kind="error">{error.message}</Alert>;
   const present = data.reduce((n, r) => n + r.present, 0);
   const absent = data.reduce((n, r) => n + r.absent, 0);
   const overall = percent(present, absent);
+  const current = data.find((r) => r.id === open);
+
+  if (current) {
+    return (
+      <>
+        <Button className="mb" onClick={() => setOpen(null)}><ArrowLeft size={16} aria-hidden="true" /> All subjects</Button>
+        <div className="card">
+          <h2>{current.subject}</h2>
+          <p className="muted">
+            {current.percent === null ? 'No percentage yet' : <Badge kind={current.percent < 75 ? 'bad' : 'ok'}>{current.percent}%</Badge>}{' '}
+            {current.present} present · {current.absent} absent · {current.leave} leave
+          </p>
+        </div>
+        <Table
+          rows={current.entries}
+          empty="No classes recorded for this subject yet."
+          columns={[
+            { key: 'date', label: 'Date', text: (r) => r.date, render: (r) => longDate(r.date) },
+            { key: 'period', label: 'Period' },
+            { key: 'status', label: 'Status', text: (r) => STATUS_LOOK[r.status]?.[1] ?? r.status, render: (r) => <Badge kind={STATUS_LOOK[r.status]?.[0]}>{STATUS_LOOK[r.status]?.[1] ?? r.status}</Badge> },
+          ]}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <div className="card"><div className="stat">{overall === null ? '—' : `${overall}%`}</div><div className="stat-label">Overall</div></div>
-      <Table
-        rows={data}
-        empty="No attendance recorded yet."
-        columns={[
-          { key: 'subject', label: 'Subject' }, { key: 'present', label: 'Present' }, { key: 'absent', label: 'Absent' },
-          { key: 'leave', label: 'Leave' },
-          { key: 'percent', label: '%', render: (r) => (r.percent === null ? '—' : <Badge kind={r.percent < 75 ? 'bad' : 'ok'}>{r.percent}%</Badge>) },
-        ]}
-      />
-      <p className="muted">Percentage = present ÷ (present + absent). Leave is not counted.</p>
+      {!data.length && <p className="muted">No attendance recorded yet.</p>}
+      <div className="subjects">
+        {data.map((r) => {
+          const low = r.percent !== null && r.percent < 75;
+          return (
+            <button type="button" key={r.id} className="card subject-card" onClick={() => setOpen(r.id)}
+              aria-label={`${r.subject}, ${r.percent === null ? 'no percentage yet' : `${r.percent} percent`}. Show date by date`}>
+              <span className="subject-top"><strong>{r.subject}</strong><ChevronRight size={18} aria-hidden="true" /></span>
+              <span className={`subject-pct${low ? ' low' : ''}`}>{r.percent === null ? '—' : `${r.percent}%`}</span>
+              <span className={`subject-bar${low ? ' low' : ''}`} aria-hidden="true"><i style={{ width: `${r.percent ?? 0}%` }} /></span>
+              <span className="muted">{r.present} present · {r.absent} absent · {r.leave} leave</span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="muted">Percentage = present ÷ (present + absent). Leave is not counted. Tap a subject to see each day.</p>
     </>
   );
 }

@@ -31,7 +31,7 @@ export default function PlatformAdmins() {
         {loading ? <Loading /> : (
           <Table rows={data} columns={[
             { key: 'displayName', label: 'Name' },
-            { key: 'email', label: 'Sign in as', render: (u) => u.email.replace('@techomato.local', '') },
+            { key: 'email', label: 'Sign in as', text: (u) => u.email.replace('@techomato.local', ''), render: (u) => u.email.replace('@techomato.local', '') },
           ]} />
         )}
       </div>

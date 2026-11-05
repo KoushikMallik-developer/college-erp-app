@@ -1,34 +1,76 @@
 import { Link } from 'react-router-dom';
-import { doc, getCountFromServer, getDoc, limit, orderBy, query, where } from 'firebase/firestore';
+import { CalendarDays, ClipboardCheck, FileText, MessageSquare, Star } from 'lucide-react';
+import { doc, getAggregateFromServer, getCountFromServer, getDoc, limit, orderBy, query, sum, where } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useCtx } from '../../app/AuthProvider';
 import { tcol, isAdminRole, ROLES } from '../../lib/tenant';
 import { attendanceBySubject, attendanceStreak, percent } from '../../lib/calc';
 import { list } from '../../lib/data';
 import { Alert, Badge, Loading, PageHeader, useAsync } from '../../components/ui';
-import { Icon, Mascot, Ring, greeting } from '../../components/widgets';
+import { Bars, Mascot, Ring, greeting } from '../../components/widgets';
 import { AnnouncementList } from '../announcements/Announcements';
 import { UpcomingEvents } from '../calendar/Calendar';
 
 const count = async (q) => (await getCountFromServer(q)).data().count;
 
-function AdminStats() {
+const dayBefore = (date, n) => new Date(Date.parse(`${date}T00:00:00Z`) - n * 864e5).toISOString().slice(0, 10);
+
+// Attendance for the last 7 days (one aggregate read per day, not one read per register) and what needs an admin's decision.
+function AdminOverview() {
   const { iid, today } = useCtx();
   const { data, loading, error } = useAsync(async () => {
-    const [students, faculty, departments, courses, sessions, pending] = await Promise.all([
+    const days = Array.from({ length: 7 }, (_, i) => dayBefore(today(), 6 - i));
+    const [bars, leave, grievance, drafts] = await Promise.all([
+      Promise.all(days.map(async (date) => {
+        const t = (await getAggregateFromServer(query(tcol(iid, 'classSessions'), where('date', '==', date)), { present: sum('presentCount'), absent: sum('absentCount') })).data();
+        return { date, pct: percent(t.present, t.absent) };
+      })),
+      count(query(tcol(iid, 'requests'), where('status', '==', 'PENDING'), where('kind', '==', 'LEAVE'))),
+      count(query(tcol(iid, 'requests'), where('status', '==', 'PENDING'), where('kind', '==', 'GRIEVANCE'))),
+      count(query(tcol(iid, 'exams'), where('status', '==', 'DRAFT'))),
+    ]);
+    return { bars, queue: [['/requests', 'Leave requests to decide', leave], ['/requests', 'Grievances to resolve', grievance], ['/exams', 'Exams not yet published', drafts]] };
+  }, [iid]);
+  if (loading) return <Loading />;
+  if (error) return <Alert kind="error">{error.message}</Alert>;
+  const week = data.bars.filter((b) => b.pct !== null);
+  return (
+    <div className="grid two">
+      <div className="card">
+        <h2>Attendance overview</h2>
+        <p className="muted">Share of students present, last 7 days{week.length ? ` · average ${Math.round(week.reduce((n, b) => n + b.pct, 0) / week.length)}%` : ''}</p>
+        <Bars
+          ariaLabel={data.bars.map((b) => `${b.date}: ${b.pct === null ? 'no registers' : `${b.pct} percent`}`).join(', ')}
+          items={data.bars.map((b) => ({ key: b.date, pct: b.pct, now: b.date === today(), label: new Date(`${b.date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short' }), title: `${b.date}: ${b.pct === null ? 'no registers' : `${b.pct}%`}` }))}
+        />
+      </div>
+      <div className="card">
+        <h2>Review queue</h2>
+        <p className="muted">What is waiting for you</p>
+        <ul className="queue">
+          {data.queue.map(([to, label, n]) => (
+            <li key={label}><Link to={to}><span>{label}</span><Badge kind={n ? 'warn' : 'ok'}>{n}</Badge></Link></li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function AdminStats() {
+  const { iid } = useCtx();
+  const { data, loading, error } = useAsync(async () => {
+    const [students, faculty, departments, courses, pending] = await Promise.all([
       count(query(tcol(iid, 'students'), where('status', '==', 'ACTIVE'))),
       count(query(tcol(iid, 'faculty'), where('status', '==', 'ACTIVE'))),
       count(tcol(iid, 'departments')),
       count(tcol(iid, 'courses')),
-      list(query(tcol(iid, 'classSessions'), where('date', '==', today()))),
       count(query(tcol(iid, 'requests'), where('status', '==', 'PENDING'))),
     ]);
-    const sum = (k) => sessions.reduce((n, s) => n + (s[k] ?? 0), 0);
-    return { students, faculty, departments, courses, pending, present: sum('presentCount'), absent: sum('absentCount'), leave: sum('leaveCount'), sessions: sessions.length };
+    return { students, faculty, departments, courses, pending };
   }, [iid]);
   if (loading) return <Loading />;
   if (error) return <Alert kind="error">{error.message}</Alert>;
-  const pct = percent(data.present, data.absent);
   const tiles = [
     ['Active students', data.students], ['Active faculty', data.faculty],
     ['Departments', data.departments], ['Courses', data.courses],
@@ -43,16 +85,7 @@ function AdminStats() {
           <div className="stat">{data.pending}</div><div className="stat-label">Student requests waiting</div>
         </Link>
       </div>
-      <div className="card">
-        <h2>Today's attendance</h2>
-        {data.sessions === 0 ? <p className="muted">No registers saved yet today.</p> : (
-          <p>
-            {data.sessions} class sessions · <Badge kind="ok">{data.present} present</Badge>{' '}
-            <Badge kind="bad">{data.absent} absent</Badge> <Badge kind="warn">{data.leave} leave</Badge>
-            {pct !== null && <> · {pct}% present</>}
-          </p>
-        )}
-      </div>
+      <AdminOverview />
     </>
   );
 }
@@ -64,19 +97,31 @@ const BADGES = [
   ['On a roll', 'Five days present in a row', (d) => d.streak >= 5],
 ];
 const TILES = [
-  ['/attendance', 'My attendance', 'M20 6 9 17l-5-5'],
-  ['/exams', 'My results', 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5'],
-  ['/calendar', 'Calendar', 'M3 6h18v15H3zM16 2v4M8 2v4M3 10h18'],
-  ['/requests', 'Ask or tell us', 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z'],
+  ['/attendance', 'My attendance', ClipboardCheck],
+  ['/exams', 'My results', FileText],
+  ['/calendar', 'Calendar', CalendarDays],
+  ['/requests', 'Ask or tell us', MessageSquare],
 ];
 
 function StudentHome() {
-  const { iid, profile } = useCtx();
+  const { iid, profile, today } = useCtx();
   const { data, loading, error } = useAsync(async () => {
-    const docs = await list(query(tcol(iid, 'studentAttendance'), where('studentId', '==', profile.studentId)));
-    const t = Object.values(attendanceBySubject(docs));
+    const [docs, subjects] = await Promise.all([
+      list(query(tcol(iid, 'studentAttendance'), where('studentId', '==', profile.studentId))),
+      list(tcol(iid, 'subjects')),
+    ]);
+    const names = Object.fromEntries(subjects.map((s) => [s.id, s.name]));
+    const by = attendanceBySubject(docs);
+    const t = Object.values(by);
     const sum = (k) => t.reduce((n, x) => n + x[k], 0);
-    return { overall: percent(sum('present'), sum('absent')), marked: sum('present') + sum('absent') + sum('leave'), streak: attendanceStreak(docs) };
+    const subjectBars = Object.entries(by).map(([id, x]) => ({ key: id, label: names[id] ?? id, pct: x.percent }));
+    // Record keys are dYYYYMMDD_period: count every subject's marks that fall on each of the last 7 days.
+    const dayBars = Array.from({ length: 7 }, (_, i) => {
+      const date = dayBefore(today(), 6 - i), tag = `d${date.replaceAll('-', '')}_`;
+      const marks = docs.flatMap((d) => Object.entries(d.records ?? {}).filter(([k]) => k.startsWith(tag)).map(([, v]) => v));
+      return { key: date, pct: percent(marks.filter((v) => v === 'PRESENT').length, marks.filter((v) => v === 'ABSENT').length), label: new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short' }), now: date === today(), title: `${date}: ${marks.length ? `${marks.length} classes` : 'no classes'}` };
+    });
+    return { overall: percent(sum('present'), sum('absent')), dayBars, marked: sum('present') + sum('absent') + sum('leave'), streak: attendanceStreak(docs), subjectBars };
   }, [iid]);
   if (loading) return <Loading />;
   if (error) return <Alert kind="error">{error.message}</Alert>;
@@ -97,16 +142,30 @@ function StudentHome() {
         <Ring value={data.overall} label="Overall attendance" />
       </section>
       <div className="tiles">
-        {TILES.map(([to, label, d]) => (
-          <Link to={to} className="card tile" key={to}><Icon d={d} size={28} /><span>{label}</span></Link>
+        {TILES.map(([to, label, Glyph]) => (
+          <Link to={to} className="card tile" key={to}><Glyph size={28} /><span>{label}</span></Link>
         ))}
       </div>
+      {data.subjectBars.length > 0 && (
+        <div className="grid two">
+          <div className="card">
+            <h2>Attendance by subject</h2>
+            <p className="muted">Bars under 75% are marked in red.</p>
+            <Bars ariaLabel={data.subjectBars.map((b) => `${b.label}: ${b.pct === null ? 'no data' : `${b.pct} percent`}`).join(', ')} items={data.subjectBars} />
+          </div>
+          <div className="card">
+            <h2>Attendance by day</h2>
+            <p className="muted">All your classes, last 7 days. Days without classes are empty.</p>
+            <Bars ariaLabel={data.dayBars.map((b) => `${b.key}: ${b.pct === null ? 'no classes' : `${b.pct} percent`}`).join(', ')} items={data.dayBars} />
+          </div>
+        </div>
+      )}
       <div className="card">
         <h2>Your badges</h2>
         <ul className="badges">
           {BADGES.map(([name, how, earned]) => (
             <li key={name} className={earned(data) ? 'got' : ''}>
-              <span className="badge-star" aria-hidden="true"><Icon d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z" size={22} /></span>
+              <span className="badge-star" aria-hidden="true"><Star size={22} /></span>
               <strong>{name}</strong>
               <span className="muted">{earned(data) ? how : `Locked: ${how}`}</span>
             </li>
@@ -118,13 +177,37 @@ function StudentHome() {
 }
 
 function FacultySummary() {
-  const { iid, profile } = useCtx();
-  const { data, loading } = useAsync(
-    () => count(query(tcol(iid, 'teachingAssignments'), where('facultyId', '==', profile.facultyId), where('active', '==', true))),
-    [iid],
-  );
+  const { iid, profile, today } = useCtx();
+  const { data, loading, error } = useAsync(async () => {
+    const from = dayBefore(today(), 6);
+    const [classes, sessions] = await Promise.all([
+      count(query(tcol(iid, 'teachingAssignments'), where('facultyId', '==', profile.facultyId), where('active', '==', true))),
+      // The chart is optional: if it cannot load (for example its index is still building) the class count still shows.
+      list(query(tcol(iid, 'classSessions'), where('facultyId', '==', profile.facultyId), where('date', '>=', from))).catch((e) => e),
+    ]);
+    if (sessions instanceof Error) return { classes, chartError: sessions.message };
+    const bars = Array.from({ length: 7 }, (_, i) => {
+      const date = dayBefore(today(), 6 - i);
+      const day = sessions.filter((s) => s.date === date);
+      return { date, pct: percent(day.reduce((n, s) => n + s.presentCount, 0), day.reduce((n, s) => n + s.absentCount, 0)), registers: day.length };
+    });
+    return { classes, bars };
+  }, [iid]);
   if (loading) return <Loading />;
-  return <div className="card"><div className="stat">{data}</div><div className="stat-label">Classes you teach now</div></div>;
+  if (error) return <Alert kind="error">{error.message}</Alert>;
+  return (
+    <div className="grid two">
+      <div className="card"><div className="stat">{data.classes}</div><div className="stat-label">Classes you teach now</div></div>
+      <div className="card">
+        <h2>Attendance in your classes</h2>
+        <p className="muted">Share of students present, last 7 days</p>
+        {data.chartError ? <Alert kind="error">{data.chartError}</Alert> : <Bars
+          ariaLabel={data.bars.map((b) => `${b.date}: ${b.pct === null ? 'no registers' : `${b.pct} percent`}`).join(', ')}
+          items={data.bars.map((b) => ({ key: b.date, pct: b.pct, now: b.date === today(), label: new Date(`${b.date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short' }), title: `${b.date}: ${b.registers} registers${b.pct === null ? '' : `, ${b.pct}% present`}` }))}
+        />}
+      </div>
+    </div>
+  );
 }
 
 const ACTIONS = {

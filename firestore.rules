@@ -131,6 +131,16 @@ service cloud.firestore {
             'sections', 'exams', 'announcements'] && isAdmin(iid);
       }
 
+      // "Something changed": every write in the college touches this one document and every signed-in user listens to it,
+      // so open pages refresh without a reload. The ten-second gap per touch limits how fast anyone can wake the others.
+      match /meta/live {
+        allow read: if tenantOk(iid);
+        allow write: if tenantOk(iid)
+          && request.resource.data.keys().hasOnly(['at', 'by'])
+          && request.resource.data.at == request.time && request.resource.data.by == request.auth.uid
+          && (resource == null || request.time > resource.data.at + duration.value(10, 's'));
+      }
+
       match /students/{studentId} {
         allow read: if isAdmin(iid) || (isStudent(iid) && me().studentId == studentId);
         allow get: if isLibrarian(iid) && libraryOn(iid, me().libraryId);
@@ -441,7 +451,10 @@ service cloud.firestore {
           && assignment(request.resource.data.assignmentId).facultyId == me().facultyId
           && assignment(request.resource.data.assignmentId).active == true
           && assignment(request.resource.data.assignmentId).sectionId == request.resource.data.sectionId
-          && assignment(request.resource.data.assignmentId).subjectId == request.resource.data.subjectId;
+          && assignment(request.resource.data.assignmentId).subjectId == request.resource.data.subjectId
+          && request.resource.data.get('presentCount', 0) is int && request.resource.data.get('presentCount', 0) >= 0
+          && request.resource.data.get('absentCount', 0) is int && request.resource.data.get('absentCount', 0) >= 0
+          && request.resource.data.get('leaveCount', 0) is int && request.resource.data.get('leaveCount', 0) >= 0;
       }
 
       match /facultyAttendance/{id} {

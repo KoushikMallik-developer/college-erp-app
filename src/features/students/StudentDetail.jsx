@@ -7,6 +7,7 @@ import { tcol, tdoc } from '../../lib/tenant';
 import { audit } from '../../lib/audit';
 import { byId, list } from '../../lib/data';
 import FilePanel from '../../components/FilePanel';
+import ReportCard from './ReportCard';
 import { Alert, Badge, Button, Facts, Input, Loading, Modal, PageHeader, Select, Table, Tabs, toOptions, useAction, useAsync, useConfirm, useForm } from '../../components/ui';
 
 export default function StudentDetail() {
@@ -29,10 +30,11 @@ export default function StudentDetail() {
       </PageHeader>
       <Tabs
         value={tab} onChange={setTab}
-        tabs={[{ value: 'profile', label: 'Profile' }, { value: 'enrollments', label: 'Enrollments' }, { value: 'documents', label: 'Documents' }]}
+        tabs={[{ value: 'profile', label: 'Profile' }, { value: 'enrollments', label: 'Enrollments' }, { value: 'report', label: 'Report card' }, { value: 'documents', label: 'Documents' }]}
       />
       {tab === 'profile' && <Profile s={s} reload={reload} />}
       {tab === 'enrollments' && <Enrollments s={s} />}
+      {tab === 'report' && <ReportCard student={s} />}
       {tab === 'documents' && <FilePanel collection="students" ownerId={s.id} canUpload />}
     </>
   );

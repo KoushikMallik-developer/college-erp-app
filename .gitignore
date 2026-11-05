@@ -8,3 +8,4 @@ service-account*.json
 .wrangler
 .firebase
 .vercel
+graphify-out/

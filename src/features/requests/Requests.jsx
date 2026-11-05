@@ -133,7 +133,7 @@ function Inbox() {
           rows={data}
           empty={tab === 'PENDING' ? 'Nothing is waiting. Nice.' : 'No requests yet.'}
           columns={[
-            { key: 'studentName', label: 'From', render: (r) => r.studentName ?? `${r.facultyName} (faculty)` },
+            { key: 'studentName', label: 'From', text: (r) => r.studentName ?? `${r.facultyName} (faculty)`, render: (r) => r.studentName ?? `${r.facultyName} (faculty)` },
             { key: 'kind', label: 'Type', render: (r) => KIND[r.kind] },
             { key: 'subject', label: 'About' },
             { key: 'dates', label: 'Dates', render: dates },
@@ -165,7 +165,7 @@ function Review({ r, onClose }) {
     <Modal title={`${KIND[r.kind]} from ${r.studentName ?? r.facultyName}`} onClose={() => onClose(false)}>
       <Alert kind="error">{error}</Alert>
       <p><strong>{r.subject}</strong>{dates(r) && <> · {dates(r)}</>}</p>
-      <p style={{ whiteSpace: 'pre-wrap' }}>{r.message}</p>
+      <p className="pre-wrap">{r.message}</p>
       {pending ? (
         <>
           <Textarea label="Your answer (the student sees this)" maxLength={500} {...bind('response')} />

@@ -28,12 +28,12 @@ export default function Faculty() {
         <Button disabled={!page.rows.length} onClick={() => downloadCsv('faculty.csv', toCsv([['Employee code', 'Name', 'Email', 'Phone', 'Designation', 'Status'],
           ...page.rows.map((r) => [r.employeeCode, r.name, r.email, r.phone, r.designation, r.status])]))}>Export CSV</Button>
       </PageHeader>
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row mb">
         <Select label="Status" value={status} onChange={setStatus} placeholder="All"
           options={[{ value: 'ACTIVE', label: 'Active' }, { value: 'INACTIVE', label: 'Inactive' }]} />
       </div>
       <Alert kind="error">{page.error?.message}</Alert>
-      <Table
+      <Table plain
         rows={page.rows}
         empty={page.loading ? 'Loading…' : 'No faculty found.'}
         columns={[
@@ -43,7 +43,7 @@ export default function Faculty() {
           { key: 'status', label: 'Status', render: (f) => <Badge kind={f.status === 'ACTIVE' ? 'ok' : 'bad'}>{f.status}</Badge> },
         ]}
       />
-      {page.more && <div className="row" style={{ marginTop: 12 }}><Button onClick={page.loadMore}>Load more</Button></div>}
+      {page.more && <div className="row mt"><Button onClick={page.loadMore}>Load more</Button></div>}
       {importing && <ImportFaculty onClose={(saved) => { setImporting(false); if (saved) page.reload(); }} />}
       {creating && <CreateFaculty onClose={(saved) => { setCreating(false); if (saved) page.reload(); }} />}
     </>

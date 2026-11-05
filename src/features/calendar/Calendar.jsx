@@ -127,7 +127,7 @@ function EventDetail({ e, admin, onClose, onEdit, onDelete }) {
   return (
     <Modal title={e.title} onClose={onClose}>
       <p><Badge kind={e.type === 'HOLIDAY' ? 'bad' : e.type === 'EXAM' ? 'warn' : e.type === 'EVENT' ? 'ok' : ''}>{TYPE_NAME[e.type]}</Badge> {span(e)}</p>
-      {e.description && <p style={{ whiteSpace: 'pre-wrap' }}>{e.description}</p>}
+      {e.description && <p className="pre-wrap">{e.description}</p>}
       <Alert kind="error">{action.error}</Alert>
       {e.rsvp && (
         <div className="card rsvp">

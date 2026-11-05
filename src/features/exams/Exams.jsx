@@ -74,7 +74,7 @@ function CreateExam({ onClose }) {
           <Input label="Start date" type="date" required {...bind('startDate')} />
           <Input label="End date" type="date" required {...bind('endDate')} />
         </div>
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="row mt">
           <Button variant="primary" type="submit" disabled={busy}>Create</Button>
           <Button onClick={() => onClose(false)}>Cancel</Button>
         </div>
@@ -355,7 +355,7 @@ function MarksEntry() {
   return (
     <>
       <Alert kind="error">{base.error?.message || papers.error?.message}</Alert>
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row mb">
         <Select label="Exam (open for marks)" value={examId} onChange={(v) => { setExamId(v); setPaperId(''); }} options={toOptions(base.data.exams)} />
         <Select label="Paper" value={paperId} onChange={setPaperId} options={mine.map((m) => ({ value: m.paper.id, label: `${m.paper.subjectName} (max ${m.paper.maxMarks})` }))} />
       </div>
@@ -415,7 +415,7 @@ function MarksSheet({ exam, paper, a, ctx }) {
     <div className="card">
       <Alert kind="error">{err}</Alert>
       <Alert kind="ok">{done}</Alert>
-      <Table
+      <Table plain
         rows={data.roster.map((s) => ({ ...s, id: s.studentId }))}
         empty="No active students in this section."
         columns={[
@@ -427,12 +427,12 @@ function MarksSheet({ exam, paper, a, ctx }) {
               onChange={(e) => setEdits({ ...edits, [s.studentId]: { ...valueOf(s), marks: e.target.value } })} />
           ) },
           { key: 'absent', label: 'Absent', render: (s) => (
-            <input type="checkbox" aria-label={`${s.studentName} absent`} style={{ width: 20, minHeight: 20 }} checked={valueOf(s).absent}
+            <input type="checkbox" aria-label={`${s.studentName} absent`} className="tick" checked={valueOf(s).absent}
               onChange={(e) => setEdits({ ...edits, [s.studentId]: { ...valueOf(s), absent: e.target.checked } })} />
           ) },
         ]}
       />
-      <div className="row" style={{ marginTop: 12 }}>
+      <div className="row mt">
         <Button variant="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save marks'}</Button>
       </div>
     </div>

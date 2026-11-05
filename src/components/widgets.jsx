@@ -1,17 +1,5 @@
 import { useEffect, useState } from 'react';
-
-const sunMoon = {
-  sun: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4',
-  moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
-};
-
-export function Icon({ d, size = 18 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d={d} />
-    </svg>
-  );
-}
+import { Moon, Sun } from 'lucide-react';
 
 const systemTheme = () => (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 
@@ -26,7 +14,7 @@ export function ThemeToggle() {
   };
   return (
     <button type="button" className="icon-btn" onClick={flip} aria-label={theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'}>
-      <Icon d={theme === 'dark' ? sunMoon.sun : sunMoon.moon} />
+      {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
     </button>
   );
 }
@@ -61,7 +49,7 @@ export function Ring({ value, label }) {
   );
 }
 
-// The Techomato tomato with a face, for the student pages.
+// The Techomato mascot (a round blue character with a leaf), for the student pages.
 export function Mascot({ size = 64, mood = 'happy' }) {
   const mouth = mood === 'worried' ? 'M12 28c2-2 8-2 10 0' : 'M11.5 25.5c2 3.2 9 3.2 11 0';
   return (
@@ -76,3 +64,18 @@ export function Mascot({ size = 64, mood = 'happy' }) {
 }
 
 export const greeting = (hour = new Date().getHours()) => (hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening');
+
+// A bar chart of percentages. items: [{ key, label, pct (null = no data), now?, title? }]
+export function Bars({ items, ariaLabel }) {
+  return (
+    <div className="bars" role="img" aria-label={ariaLabel}>
+      {items.map((b) => (
+        <div className="bar-col" key={b.key} title={b.title ?? `${b.label}: ${b.pct === null ? 'no data' : `${b.pct}%`}`}>
+          <span className="bar-val">{b.pct === null ? '' : `${Math.round(b.pct)}%`}</span>
+          <div className="bar-track"><div className={`bar${b.pct === null ? ' none' : ''}${b.now ? ' now' : ''}${b.pct !== null && b.pct < 75 ? ' low' : ''}`} style={{ height: `${b.pct ?? 2}%` }} /></div>
+          <span className="bar-day">{b.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}

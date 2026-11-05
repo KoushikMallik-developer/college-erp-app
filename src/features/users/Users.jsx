@@ -46,7 +46,7 @@ function UserList() {
 
   return (
     <>
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row mb">
         {isSuper && <Button variant="primary" onClick={() => setCreating(true)}>Add College Admin</Button>}
       </div>
       <Alert kind="info">This list shows admin accounts. Faculty and student logins are created and deactivated from their own profile pages.</Alert>
@@ -119,7 +119,7 @@ function AuditLog() {
       rows={data}
       empty="Nothing logged yet."
       columns={[
-        { key: 'timestamp', label: 'When', render: (l) => l.timestamp?.toDate?.().toLocaleString() ?? '' },
+        { key: 'timestamp', label: 'When', text: (l) => l.timestamp?.toMillis?.() ?? 0, render: (l) => l.timestamp?.toDate?.().toLocaleString() ?? '' },
         { key: 'action', label: 'Action' }, { key: 'entityType', label: 'Entity' },
         { key: 'actorUid', label: 'By (uid)' },
         { key: 'metadata', label: 'Details', render: (l) => JSON.stringify(l.metadata ?? {}) },

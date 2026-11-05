@@ -20,7 +20,7 @@ export default function FilePanel({ collection, ownerId, kind = 'DOCUMENT', canU
   return (
     <div>
       <Alert kind="error">{error?.message || action.error}</Alert>
-      {canUpload && <div className="row" style={{ marginBottom: 12 }}><Button variant="primary" onClick={() => setUploading(true)}>Upload file</Button></div>}
+      {canUpload && <div className="row mb"><Button variant="primary" onClick={() => setUploading(true)}>Upload file</Button></div>}
       <Table
         rows={data}
         empty="No files yet."

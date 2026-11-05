@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { splitPromotion, addDays, overdueDays, toCsv, csvEscape, leaveOverlaps, parseCsv, generateTimetable, slotLocks, attendanceBySubject, attendanceStreak, checkExam, groupByCost, computeResult, enrollmentKey, percent, planAttendanceWrites, loginEmail, recordKey, roomKey, todayIn, validTimeZone } from '../src/lib/calc';
+import { splitPromotion, addDays, overdueDays, toCsv, csvEscape, leaveOverlaps, parseCsv, generateTimetable, slotLocks, attendanceBySubject, attendanceEntries, attendanceStreak, checkExam, groupByCost, computeResult, enrollmentKey, percent, planAttendanceWrites, loginEmail, recordKey, roomKey, todayIn, validTimeZone } from '../src/lib/calc';
 
 describe('attendance', () => {
   it('excludes leave from the percentage', () => {
     expect(percent(3, 1)).toBe(75);
     expect(percent(0, 0)).toBeNull();
+  });
+
+  it('lists the marks of a subject date by date, newest first, and skips keys it does not know', () => {
+    const e = attendanceEntries([
+      { assignmentId: 'a1', records: { d20261001_1: 'PRESENT', d20261003_2: 'ABSENT', bogus: 'PRESENT' } },
+      { assignmentId: 'a2', records: { d20261003_1: 'LEAVE' } },
+    ]);
+    expect(e.map((x) => `${x.date}/${x.period}/${x.status}`)).toEqual(['2026-10-03/2/ABSENT', '2026-10-03/1/LEAVE', '2026-10-01/1/PRESENT']);
+    expect(new Set(e.map((x) => x.id)).size).toBe(3);
   });
 
   it('totals records per subject across assignments', () => {

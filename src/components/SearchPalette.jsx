@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Search as SearchGlyph } from 'lucide-react';
 import { limit, query, where } from 'firebase/firestore';
 import { useCtx } from '../app/AuthProvider';
 import { tcol, isAdminRole } from '../lib/tenant';
 import { list } from '../lib/data';
 import { Button, Input, Modal } from './ui';
-import { Icon } from './widgets';
 
 const END = '';
 const upperFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 // Prefix searches. Firestore compares exactly, so a name is tried as typed and with a capital first letter,
 // and the enrollment key (stored in capitals) with the text in capitals. Five results per kind keeps reads low.
-async function searchPeople(iid, text) {
+export async function searchPeople(iid, text) {
   const q = text.trim();
   const byPrefix = (col, field, prefix) =>
     list(query(tcol(iid, col), where(field, '>=', prefix), where(field, '<=', prefix + END), limit(5)));
@@ -50,7 +50,7 @@ export default function SearchPalette({ pages }) {
   return (
     <>
       <button type="button" className="search-btn" onClick={() => setOpen(true)} aria-label="Search" aria-keyshortcuts="Control+K">
-        <Icon d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3" />
+        <SearchGlyph size={18} />
         <span>Search</span>
         <kbd aria-hidden="true">Ctrl K</kbd>
       </button>

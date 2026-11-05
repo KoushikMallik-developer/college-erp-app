@@ -51,7 +51,7 @@ To use the local emulators instead of a real project, set `VITE_USE_EMULATOR=tru
 ```bash
 npx firebase emulators:start --only auth,firestore --project demo-erp
 GCLOUD_PROJECT=demo-erp FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 \
-  node scripts/create-platform-admin.js you@example.com "Your Name"
+  PLATFORM_ADMIN_PASSWORD='a-strong-password-12+' node scripts/create-platform-admin.js you@example.com "Your Name"
 ```
 
 To fill the emulators with a demo college (principal, teacher, student, librarian with a library, attendance, an announcement), run this once the emulators are up. It refuses to run against a real project; every demo login uses the password `Passw0rd!`:
