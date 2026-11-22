@@ -310,7 +310,9 @@ export function useAsync(fn, deps) {
     if (!quiet) setState((s) => ({ ...s, loading: true, error: null }));
     fn().then(
       (data) => current && setState({ data, loading: false, error: null }),
-      (error) => current && (quiet ? undefined : setState({ data: undefined, loading: false, error })),
+      // A quiet reload that fails keeps what is on screen, but if nothing was ever loaded the error must show: in development
+      // React runs the effect twice, and the first run's failure is dropped, so the second (quiet) run is the only one left.
+      (error) => current && setState((s) => (quiet && s.data !== undefined ? s : { data: undefined, loading: false, error })),
     );
     return () => { current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps

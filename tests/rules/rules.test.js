@@ -19,6 +19,8 @@ const users = {
   stu1: { role: 'STUDENT', institutionId: 'c1', studentId: 's1' },
   stu2: { role: 'STUDENT', institutionId: 'c1', studentId: 's2' },
   ca2: { role: 'COLLEGE_ADMIN', institutionId: 'c2' },
+  par1: { role: 'PARENT', institutionId: 'c1', studentId: 's1' },
+  par2: { role: 'PARENT', institutionId: 'c1', studentId: 's2' },
 };
 
 async function seed() {
@@ -302,6 +304,30 @@ describe('marks and results', () => {
     const draft = setDoc(doc(as('ca1'), ...P('c1', 'results', 'e1_s2')), { examId: 'e1', studentId: 's2' });
     await assertSucceeds(draft);
     await assertFails(updateDoc(doc(as('ca1'), ...P('c1', 'results', 'e2_s1')), { total: 99 }));
+  });
+});
+
+describe('one-day timetable changes', () => {
+  const change = (over = {}) => ({ date: '2026-11-09', slotId: 'slotA', facultyId: 'f1', type: 'SUBSTITUTE', substituteFacultyId: 'f2', ...over });
+  const ref = (u, id = '2026-11-09_slotA') => doc(as(u), ...P('c1', 'timetableChanges', id));
+
+  it('only an admin writes a change; everyone in the college reads it', async () => {
+    await assertSucceeds(setDoc(ref('ca1'), change()));
+    await assertFails(setDoc(ref('fac1'), change()));
+    await assertFails(setDoc(ref('stu1'), change()));
+    await assertSucceeds(getDoc(ref('stu1')));
+    await assertSucceeds(getDoc(ref('fac2')));
+  });
+  it('the id must be date_slotId, a substitute must be named, and not the same teacher', async () => {
+    await assertFails(setDoc(ref('ca1', 'wrong-id'), change()));
+    const { substituteFacultyId, ...noSub } = change(); // eslint-disable-line no-unused-vars
+    await assertFails(setDoc(ref('ca1'), noSub));
+    await assertFails(setDoc(ref('ca1'), change({ substituteFacultyId: 'f1' })));
+    await assertSucceeds(setDoc(ref('ca1'), { ...noSub, type: 'CANCELLED' }));
+  });
+  it('another college cannot read it', async () => {
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), ...P('c1', 'timetableChanges', '2026-11-09_slotA')), change()));
+    await assertFails(getDoc(doc(as('ca2'), ...P('c1', 'timetableChanges', '2026-11-09_slotA'))));
   });
 });
 
@@ -962,5 +988,129 @@ describe('live-update signal', () => {
     await assertFails(setDoc(doc(as('stu1'), ...P('c1', 'meta', 'live')), { at: serverTimestamp(), by: 'ca1' }));
     await assertSucceeds(touch('stu1'));
     await assertFails(touch('fac1')); // too soon after the last touch
+  });
+});
+
+describe('parent logins', () => {
+  const att = { studentId: 's1', subjectId: 'sub1', semesterId: 'sem1', sectionId: 'sec1', assignmentId: 'a1', facultyId: 'f1', records: { d20261102_1: 'PRESENT' } };
+  beforeEach(() => env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), ...P('c1', 'studentAttendance', 's1_a1')), att)));
+
+  it('a parent reads their own child only: profile, enrollment, attendance, published result', async () => {
+    const db = as('par1');
+    await assertSucceeds(getDoc(doc(db, ...P('c1', 'students', 's1'))));
+    await assertSucceeds(getDoc(doc(db, ...P('c1', 'enrollments', 's1_sem1'))));
+    await assertSucceeds(getDoc(doc(db, ...P('c1', 'studentAttendance', 's1_a1'))));
+    await assertSucceeds(getDoc(doc(db, ...P('c1', 'results', 'e2_s1'))));
+    await assertFails(getDoc(doc(db, ...P('c1', 'results', 'e1_s1')))); // unpublished
+    await assertFails(getDoc(doc(db, ...P('c1', 'students', 's2'))));
+    await assertFails(getDoc(doc(as('par2'), ...P('c1', 'studentAttendance', 's1_a1')))); // another child's parent
+  });
+  it("a parent cannot write anything, and cannot read the child's documents", async () => {
+    const db = as('par1');
+    await assertFails(setDoc(doc(db, ...P('c1', 'studentAttendance', 's1_a1')), att));
+    await assertFails(setDoc(doc(db, ...P('c1', 'requests', 'r1')), { kind: 'LEAVE', studentId: 's1' }));
+    await assertFails(setDoc(doc(db, ...P('c1', 'students', 's1')), { name: 'Changed' }));
+    await assertFails(getDocs(collection(db, ...P('c1', 'students', 's1', 'documents'))));
+  });
+  it('only an admin can create a parent login, never with a role above it', async () => {
+    const batch = (uid, role, id) => {
+      const db = as(uid);
+      const b = writeBatch(db);
+      b.set(doc(db, ...P('c1', 'auditLogs', id)), { actorUid: uid, timestamp: now() });
+      b.set(doc(db, 'users', 'newpar'), { role, institutionId: 'c1', studentId: 's1', active: true, auditId: id });
+      return b.commit();
+    };
+    await assertSucceeds(batch('ca1', 'PARENT', 'pa1'));
+    await assertFails(batch('ca1', 'SUPER_ADMIN', 'pa2'));
+    await assertFails(batch('fac1', 'PARENT', 'pa3'));
+    await assertFails(batch('par1', 'PARENT', 'pa4'));
+  });
+});
+
+describe('fee ledger', () => {
+  const entry = (over = {}) => ({ studentId: 's1', studentName: 'S1', type: 'CHARGE', title: 'Tuition', amount: 1000, date: '2026-11-02', auditId: 'fa1', ...over });
+  const write = (uid, id, data) => {
+    const db = as(uid);
+    const b = writeBatch(db);
+    b.set(doc(db, ...P('c1', 'auditLogs', data.auditId)), { actorUid: uid, timestamp: now() });
+    b.set(doc(db, ...P('c1', 'fees', id)), data);
+    return b.commit();
+  };
+
+  it('only an admin adds an entry, with its own audit entry, a positive amount and a known type', async () => {
+    await assertSucceeds(write('ca1', 'f1', entry()));
+    await assertFails(write('stu1', 'f2', entry({ auditId: 'fa2' })));
+    await assertFails(write('fac1', 'f3', entry({ auditId: 'fa3' })));
+    await assertFails(write('par1', 'f4', entry({ auditId: 'fa4' })));
+    await assertFails(write('ca1', 'f5', entry({ auditId: 'fa5', amount: 0 })));
+    await assertFails(write('ca1', 'f6', entry({ auditId: 'fa6', amount: -5 })));
+    await assertFails(write('ca1', 'f7', entry({ auditId: 'fa7', type: 'REFUND' })));
+    await assertFails(write('ca1', 'f8', entry({ auditId: 'fa8', amount: '100' })));
+  });
+  it('entries are never edited or deleted, even by an admin', async () => {
+    await assertSucceeds(write('ca1', 'f1', entry()));
+    await assertFails(updateDoc(doc(as('ca1'), ...P('c1', 'fees', 'f1')), { amount: 1 }));
+    await assertFails(deleteDoc(doc(as('ca1'), ...P('c1', 'fees', 'f1'))));
+  });
+  it('a student and their parent read their own entries, nobody else does', async () => {
+    await assertSucceeds(write('ca1', 'f1', entry()));
+    const q = (uid, sid) => getDocs(query(collection(as(uid), ...P('c1', 'fees')), where('studentId', '==', sid)));
+    await assertSucceeds(q('stu1', 's1'));
+    await assertSucceeds(q('par1', 's1'));
+    await assertFails(q('stu2', 's1'));
+    await assertFails(q('par2', 's1'));
+    await assertFails(q('fac1', 's1'));
+    await assertFails(getDocs(collection(as('stu1'), ...P('c1', 'fees')))); // an unfiltered list could touch others
+  });
+});
+
+describe('assignments and submissions', () => {
+  const task = (over = {}) => ({ assignmentId: 'a1', sectionId: 'sec1', semesterId: 'sem1', subjectName: 'Maths', facultyId: 'f1', title: 'Sheet 1', details: '', dueDate: '2026-11-20', linkUrl: null, ...over });
+  const tref = (uid, id = 't1') => doc(as(uid), ...P('c1', 'tasks', id));
+  const sub = (over = {}) => ({ taskId: 't1', studentId: 's1', studentName: 'S1', url: 'https://drive.google.com/x', note: '', ...over });
+  const sref = (uid, id = 't1_s1') => doc(as(uid), ...P('c1', 'submissions', id));
+  beforeEach(() => env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), ...P('c1', 'tasks', 't1')), task())));
+
+  it("a teacher posts for a class they teach, never for someone else's; students cannot post", async () => {
+    await assertSucceeds(setDoc(tref('fac1', 't2'), task()));
+    await assertFails(setDoc(tref('fac1', 't3'), task({ assignmentId: 'a2' }))); // a2 belongs to f2
+    await assertFails(setDoc(tref('fac2', 't4'), task())); // f2 does not teach a1
+    await assertFails(setDoc(tref('stu1', 't5'), task()));
+    await assertSucceeds(setDoc(tref('ca1', 't6'), task()));
+  });
+  it('rejects a task with an empty title or a link that is not https', async () => {
+    await assertFails(setDoc(tref('fac1', 't7'), task({ title: '' })));
+    await assertFails(setDoc(tref('fac1', 't8'), task({ linkUrl: 'http://x.test/a' })));
+    await assertFails(setDoc(tref('fac1', 't9'), task({ linkUrl: 'javascript:alert(1)' })));
+    await assertSucceeds(setDoc(tref('fac1', 't10'), task({ linkUrl: 'https://drive.google.com/a' })));
+  });
+  it('a task is never edited, even by its owner; only the owner or an admin deletes it', async () => {
+    await assertFails(updateDoc(tref('fac1'), { title: 'New' }));
+    await assertFails(updateDoc(tref('fac1'), { linkUrl: 'javascript:alert(1)' }));
+    await assertFails(updateDoc(tref('ca1'), { title: 'New' }));
+    await assertFails(deleteDoc(tref('stu1')));
+    await assertSucceeds(deleteDoc(tref('ca1')));
+  });
+  it('a student hands in once under their own id with an https link; others cannot', async () => {
+    await assertSucceeds(setDoc(sref('stu1'), sub()));
+    await assertSucceeds(setDoc(sref('stu1'), sub({ note: 'again' }))); // replacing is fine
+    await assertFails(setDoc(sref('stu1', 't1_s2'), sub({ studentId: 's2' }))); // not their own id
+    await assertFails(setDoc(sref('stu2', 't1_s1'), sub())); // someone else's slot
+    await assertFails(setDoc(sref('stu1'), sub({ url: 'http://x.test' })));
+    await assertFails(setDoc(sref('stu1'), sub({ studentName: 'Someone Else' })));
+    await assertFails(setDoc(sref('stu1', 'tX_s1'), sub({ taskId: 'tX' }))); // no such task
+    await assertFails(setDoc(sref('par1'), sub())); // a parent only reads
+    await assertFails(setDoc(sref('fac1'), sub()));
+  });
+  it('the owner teacher and an admin read hand-ins; another teacher and another student do not', async () => {
+    await assertSucceeds(setDoc(sref('stu1'), sub()));
+    const q = (uid) => getDocs(query(collection(as(uid), ...P('c1', 'submissions')), where('taskId', '==', 't1')));
+    await assertSucceeds(q('fac1'));
+    await assertSucceeds(q('ca1'));
+    await assertFails(q('fac2'));
+    await assertFails(q('stu2'));
+    await assertSucceeds(getDoc(sref('stu1')));
+    await assertSucceeds(getDoc(sref('par1')));
+    await assertFails(getDoc(sref('stu2')));
   });
 });

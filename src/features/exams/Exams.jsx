@@ -2,15 +2,16 @@ import { useState } from 'react';
 import { addDoc, getCountFromServer, getDoc, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useCtx } from '../../app/AuthProvider';
-import { ROLES, tcol, tdoc } from '../../lib/tenant';
+import { ROLES, isWardRole, tcol, tdoc } from '../../lib/tenant';
 import { audit } from '../../lib/audit';
-import { checkExam, computeResult, toCsv } from '../../lib/calc';
+import { cgpa, checkExam, computeResult, gpa, scaleOf, toCsv } from '../../lib/calc';
 import { byId, chunk, list } from '../../lib/data';
+import ExamSchedule, { paperTime } from './ExamSchedule';
 import { Alert, Badge, Button, Input, Loading, Modal, PageHeader, Select, Table, Textarea, toOptions, downloadCsv, useAction, useAsync, useConfirm, useForm } from '../../components/ui';
 
 export default function Exams() {
   const { role } = useCtx();
-  if (role === ROLES.STUDENT) return <><PageHeader title="My results" /><MyResults /></>;
+  if (isWardRole(role)) return <><PageHeader title={role === ROLES.PARENT ? 'Results' : 'My results'} /><ExamSchedule /><MyResults /></>;
   if (role === ROLES.FACULTY) return <><PageHeader title="Marks entry" /><MarksEntry /></>;
   return <AdminExams />;
 }
@@ -130,6 +131,7 @@ function ExamManager({ exam, onChange }) {
     await setDoc(tdoc(iid, 'examSubjects', `${exam.id}_${s.id}`), {
       examId: exam.id, subjectId: s.id, subjectName: s.name, maxMarks: Number(values.maxMarks || s.maxMarks),
       passMarks: Number(values.passMarks || s.passMarks), createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      date: values.date || null, startTime: values.startTime || null, endTime: values.endTime || null, room: values.room.trim() || null,
     });
     setDetails(null);
     reload();
@@ -241,7 +243,7 @@ function ExamManager({ exam, onChange }) {
       <Table
         rows={data.examSubjects}
         empty="No papers yet."
-        columns={[{ key: 'subjectName', label: 'Subject' }, { key: 'maxMarks', label: 'Max marks' }, { key: 'passMarks', label: 'Pass marks' }]}
+        columns={[{ key: 'subjectName', label: 'Subject' }, { key: 'date', label: 'Date', render: (p) => p.date || '—' }, { key: 'time', label: 'Time', text: paperTime, render: paperTime }, { key: 'room', label: 'Room', render: (p) => p.room || '—' }, { key: 'maxMarks', label: 'Max marks' }, { key: 'passMarks', label: 'Pass marks' }]}
         actions={draft ? (es) => <Button small variant="danger" disabled={action.busy} onClick={() => askRemovePaper(es)}>Remove paper and its marks</Button> : undefined}
       />
       {draft && <div className="row" style={{ margin: '12px 0' }}><Button onClick={() => setAdding(true)}>Add paper</Button></div>}
@@ -303,7 +305,7 @@ function ExamManager({ exam, onChange }) {
 }
 
 function AddPaper({ subjects, onSave, onClose }) {
-  const { values, bind } = useForm({ subjectId: '', maxMarks: '', passMarks: '' });
+  const { values, bind } = useForm({ subjectId: '', maxMarks: '', passMarks: '', date: '', startTime: '', endTime: '', room: '' });
   const { busy, error, run } = useAction();
   const submit = (e) => {
     e.preventDefault();
@@ -317,6 +319,10 @@ function AddPaper({ subjects, onSave, onClose }) {
           <Select label="Subject" required options={toOptions(subjects)} {...bind('subjectId')} />
           <Input label="Max marks" type="number" hint="blank = subject default" {...bind('maxMarks')} />
           <Input label="Pass marks" type="number" hint="blank = subject default" {...bind('passMarks')} />
+          <Input label="Exam date" type="date" hint="optional" {...bind('date')} />
+          <Input label="Starts" type="time" hint="optional" {...bind('startTime')} />
+          <Input label="Ends" type="time" hint="optional" {...bind('endTime')} />
+          <Input label="Room" hint="optional" {...bind('room')} />
         </div>
         <div className="row">
           <Button onClick={onClose}>Cancel</Button>
@@ -442,7 +448,8 @@ function MarksSheet({ exam, paper, a, ctx }) {
 /* ---------------- student: published results ---------------- */
 
 function MyResults() {
-  const { iid, profile } = useCtx();
+  const { iid, profile, institution } = useCtx();
+  const scale = scaleOf(institution);
   // Rules do not filter: a query that could touch an unpublished result is rejected as a whole.
   // So read the published exams first, then fetch this student's result for each by its ID.
   const { data, loading, error } = useAsync(async () => {
@@ -456,11 +463,12 @@ function MyResults() {
   return (
     <>
       <div className="row"><Button onClick={() => window.print()}>Print / save as PDF</Button></div>
+      {data.length > 1 && <p className="mt-3 mb-0 text-[15px]">CGPA <strong className="text-lg">{cgpa(data, scale)?.toFixed(2)}</strong> <span className="muted">across {data.length} exams</span></p>}
       {data.map((r) => (
         <div className="card" key={r.id} style={{ marginTop: 12 }}>
           <h2>{r.exam.name}</h2>
           <p>
-            <strong>{r.total} / {r.maxTotal}</strong> · {r.percentage}% · <Badge kind={r.passed ? 'ok' : 'bad'}>{r.passed ? 'PASS' : 'FAIL'}</Badge>
+            <strong>{r.total} / {r.maxTotal}</strong> · {r.percentage}% · <Badge kind={r.passed ? 'ok' : 'bad'}>{r.passed ? 'PASS' : 'FAIL'}</Badge> · SGPA <strong>{gpa(r.subjects, scale)?.toFixed(2)}</strong>
           </p>
           <Table
             rows={r.subjects.map((s, i) => ({ ...s, id: i }))}

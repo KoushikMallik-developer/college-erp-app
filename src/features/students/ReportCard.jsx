@@ -1,7 +1,7 @@
 import { getDoc, query, where } from 'firebase/firestore';
 import { useCtx } from '../../app/AuthProvider';
 import { tcol, tdoc } from '../../lib/tenant';
-import { attendanceBySubject, percent } from '../../lib/calc';
+import { attendanceBySubject, cgpa, gpa, percent, scaleOf } from '../../lib/calc';
 import { byId, list } from '../../lib/data';
 import { Alert, Badge, Button, Loading, Table, useAsync } from '../../components/ui';
 
@@ -24,6 +24,7 @@ export default function ReportCard({ student }) {
   if (loading) return <Loading />;
   if (error) return <Alert kind="error">{error.message}</Alert>;
   const overall = percent(data.attendance.reduce((n, r) => n + r.present, 0), data.attendance.reduce((n, r) => n + r.absent, 0));
+  const scale = scaleOf(institution);
   const pct = (r) => (r.percent === null ? '—' : <Badge kind={r.percent < 75 ? 'bad' : 'ok'}>{r.percent}%</Badge>);
   return (
     <>
@@ -39,10 +40,11 @@ export default function ReportCard({ student }) {
         ]} />
       </div>
       {data.results.length === 0 && <p className="muted">No results have been published for this student yet.</p>}
+      {data.results.length > 1 && <p className="muted">CGPA <strong>{cgpa(data.results, scale)?.toFixed(2)}</strong> across {data.results.length} exams</p>}
       {data.results.map((r) => (
         <div className="card" key={r.id}>
           <h3>{r.exam.name}</h3>
-          <p><strong>{r.total} / {r.maxTotal}</strong> · {r.percentage}% · <Badge kind={r.passed ? 'ok' : 'bad'}>{r.passed ? 'PASS' : 'FAIL'}</Badge></p>
+          <p><strong>{r.total} / {r.maxTotal}</strong> · {r.percentage}% · <Badge kind={r.passed ? 'ok' : 'bad'}>{r.passed ? 'PASS' : 'FAIL'}</Badge> · SGPA <strong>{gpa(r.subjects, scale)?.toFixed(2)}</strong></p>
           <Table plain rows={r.subjects.map((s, i) => ({ ...s, id: i }))} columns={[
             { key: 'name', label: 'Subject' }, { key: 'marks', label: 'Marks', render: (s) => (s.absent ? 'Absent' : s.marks) },
             { key: 'maxMarks', label: 'Max' }, { key: 'passMarks', label: 'Pass' },

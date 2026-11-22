@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createElement as h, act } from 'react';
+import { createElement as h, act, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it } from 'vitest';
 import { useAsync } from '../src/components/ui.jsx';
@@ -35,4 +35,14 @@ it('a live change reloads without showing loading; a changed input shows it', as
   await show(1, 'b'); // a different input is a real load
   expect(shown).toContain('loading');
   expect(shown.at(-1)).toBe('b-3');
+});
+
+it('shows the error, not an endless loading state, when the first load fails (also under StrictMode, which runs the effect twice)', async () => {
+  function Broken() {
+    const { loading, error } = useAsync(async () => { throw new Error('permission-denied'); }, []);
+    return h('p', null, loading ? 'loading' : error?.message);
+  }
+  root = createRoot(document.body.appendChild(document.createElement('div')));
+  await act(async () => root.render(h(StrictMode, null, h(Broken))));
+  expect(document.body.textContent).toContain('permission-denied');
 });

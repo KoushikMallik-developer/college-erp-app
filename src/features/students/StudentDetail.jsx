@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { doc, getDoc, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useCtx } from '../../app/AuthProvider';
 import { tcol, tdoc } from '../../lib/tenant';
 import { audit } from '../../lib/audit';
-import { byId, list } from '../../lib/data';
+import { byId, createAuthUser, list, sendSetPasswordEmail } from '../../lib/data';
 import FilePanel from '../../components/FilePanel';
 import ReportCard from './ReportCard';
 import { Alert, Badge, Button, Facts, Input, Loading, Modal, PageHeader, Select, Table, Tabs, toOptions, useAction, useAsync, useConfirm, useForm } from '../../components/ui';
@@ -30,12 +30,72 @@ export default function StudentDetail() {
       </PageHeader>
       <Tabs
         value={tab} onChange={setTab}
-        tabs={[{ value: 'profile', label: 'Profile' }, { value: 'enrollments', label: 'Enrollments' }, { value: 'report', label: 'Report card' }, { value: 'documents', label: 'Documents' }]}
+        tabs={[{ value: 'profile', label: 'Profile' }, { value: 'enrollments', label: 'Enrollments' }, { value: 'report', label: 'Report card' }, { value: 'parent', label: 'Parent login' }, { value: 'documents', label: 'Documents' }]}
       />
       {tab === 'profile' && <Profile s={s} reload={reload} />}
       {tab === 'enrollments' && <Enrollments s={s} />}
       {tab === 'report' && <ReportCard student={s} />}
+      {tab === 'parent' && <ParentLogin s={s} />}
       {tab === 'documents' && <FilePanel collection="students" ownerId={s.id} canUpload />}
+    </>
+  );
+}
+
+// A parent gets their own login that can only read this student's attendance, results, timetable, fees and announcements.
+function ParentLogin({ s }) {
+  const { iid, uid } = useCtx();
+  const parents = useAsync(() => list(query(collection(db, 'users'), where('institutionId', '==', iid), where('role', '==', 'PARENT'), where('studentId', '==', s.id))), [iid, s.id]);
+  const { values, bind, set } = useForm({ name: '', email: '' });
+  const { busy, error, done, run } = useAction();
+
+  const add = (e) => {
+    e.preventDefault();
+    run(async () => {
+      const email = values.email.trim().toLowerCase();
+      const parentUid = await createAuthUser(email);
+      const batch = writeBatch(db);
+      const auditId = audit(batch, { iid, uid }, 'PARENT_CREATED', 'users', parentUid, { studentId: s.id });
+      batch.set(doc(db, 'users', parentUid), {
+        institutionId: iid, role: 'PARENT', studentId: s.id, displayName: values.name.trim(), email, active: true, auditId,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      });
+      await batch.commit();
+      await sendSetPasswordEmail(email).catch(() => {});
+      set({ name: '', email: '' });
+      parents.reload();
+    }, 'Login created. An email to set a password was sent.');
+  };
+  const toggle = (p) =>
+    run(async () => {
+      const batch = writeBatch(db);
+      const auditId = audit(batch, { iid, uid }, p.active ? 'USER_DEACTIVATED' : 'USER_REACTIVATED', 'users', p.id, { role: 'PARENT' });
+      batch.update(doc(db, 'users', p.id), { active: !p.active, auditId, updatedAt: serverTimestamp() });
+      await batch.commit();
+      parents.reload();
+    });
+
+  return (
+    <>
+      <div className="card">
+        <h2>Parent logins</h2>
+        <Alert kind="error">{error || parents.error?.message}</Alert>
+        <Alert kind="ok">{done}</Alert>
+        <Table
+          rows={parents.data ?? []}
+          empty="No parent login yet."
+          columns={[{ key: 'displayName', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'active', label: 'Status', text: (p) => (p.active ? 'Active' : 'Blocked'), render: (p) => <Badge kind={p.active ? 'ok' : 'bad'}>{p.active ? 'Active' : 'Blocked'}</Badge> }]}
+          actions={(p) => <Button small disabled={busy} onClick={() => toggle(p)}>{p.active ? 'Block' : 'Unblock'}</Button>}
+        />
+      </div>
+      <form className="card" onSubmit={add}>
+        <h2>Add a parent login</h2>
+        <p className="muted mt-0">The parent gets an email to set a password. One email address can belong to one login in the whole system.</p>
+        <div className="form-grid">
+          <Input label="Parent's name" required maxLength={100} {...bind('name')} />
+          <Input label="Parent's email" type="email" required {...bind('email')} />
+        </div>
+        <div className="row mt-3"><Button variant="primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create login'}</Button></div>
+      </form>
     </>
   );
 }

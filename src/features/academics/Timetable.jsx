@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { doc, query, serverTimestamp, where, writeBatch } from 'firebase/firestore';
+import { deleteDoc, doc, query, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useCtx } from '../../app/AuthProvider';
 import { ROLES, isAdminRole, tcol, tdoc } from '../../lib/tenant';
@@ -123,6 +123,7 @@ function SlotForm({ slot, onClose }) {
   });
   const { busy, error, run } = useAction();
   const [confirming, setConfirming] = useState(false);
+  const [dayChange, setDayChange] = useState(false);
 
   const submit = (e) => {
     e.preventDefault();
@@ -163,6 +164,8 @@ function SlotForm({ slot, onClose }) {
       onClose(true);
     });
 
+  if (dayChange) return <DayChange slot={slot} onClose={(saved) => (saved ? onClose(false) : setDayChange(false))} />;
+
   if (confirming) {
     return (
       <Modal title="Delete this slot?" onClose={() => setConfirming(false)}>
@@ -198,7 +201,58 @@ function SlotForm({ slot, onClose }) {
         {assignments.data?.length === 0 && <Alert kind="info">No active teaching assignments for this section yet. Add one under Academics.</Alert>}
         <div className="row mt-3">
           <Button variant="primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
+          {!isNew && <Button disabled={busy} onClick={() => setDayChange(true)}>Change for one day</Button>}
           {!isNew && <Button variant="danger" disabled={busy} onClick={() => setConfirming(true)}>Delete slot</Button>}
+          <Button onClick={() => onClose(false)}>Cancel</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// A cancelled class or a substitute teacher for one date. The timetable itself does not change.
+function DayChange({ slot, onClose }) {
+  const { iid, today } = useCtx();
+  const faculty = useAsync(() => list(query(tcol(iid, 'faculty'), where('status', '==', 'ACTIVE'))), [iid]);
+  const { values, bind } = useForm({ date: today(), type: 'CANCELLED', substituteId: '', reason: '' });
+  const { busy, error, run } = useAction();
+  const weekday = (iso) => ((new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7) + 1;
+  const id = `${values.date}_${slot.id}`;
+
+  const save = (e) => {
+    e.preventDefault();
+    run(async () => {
+      if (weekday(values.date) !== slot.dayOfWeek) throw new Error(`This class is on ${DAYS[slot.dayOfWeek - 1]}. Pick a ${DAYS[slot.dayOfWeek - 1]}.`);
+      const sub = values.type === 'SUBSTITUTE' && byId(faculty.data)[values.substituteId];
+      if (values.type === 'SUBSTITUTE' && !sub) throw new Error('Choose the substitute teacher.');
+      // shortcut: the substitute's own classes in that period are not checked, check the teacher is free before saving.
+      await setDoc(tdoc(iid, 'timetableChanges', id), {
+        date: values.date, slotId: slot.id, sectionId: slot.sectionId, type: values.type, reason: values.reason.trim(),
+        facultyId: slot.facultyId, subjectName: slot.subjectName, dayOfWeek: slot.dayOfWeek, period: slot.period,
+        startTime: slot.startTime ?? null, endTime: slot.endTime ?? null, room: slot.room,
+        ...(sub && { substituteFacultyId: sub.id, substituteFacultyName: sub.name }), createdAt: serverTimestamp(),
+      });
+      onClose(true);
+    });
+  };
+  const restore = () => run(async () => { await deleteDoc(tdoc(iid, 'timetableChanges', id)); onClose(true); });
+
+  return (
+    <Modal title="Change for one day" onClose={() => onClose(false)}>
+      <form onSubmit={save}>
+        <Alert kind="error">{error}</Alert>
+        <p className="muted mt-0">{slot.subjectName}, {slot.facultyName}, period {slot.period}. Students and teachers see this on their dashboard that day.</p>
+        <div className="form-grid">
+          <Input label="Date" type="date" required min={today()} {...bind('date')} />
+          <Select label="What happens" required placeholder="Choose…" options={[{ value: 'CANCELLED', label: 'Class is cancelled' }, { value: 'SUBSTITUTE', label: 'A substitute teacher takes it' }]} {...bind('type')} />
+          {values.type === 'SUBSTITUTE' && (
+            <Select label="Substitute teacher" required options={(faculty.data ?? []).filter((f) => f.id !== slot.facultyId).map((f) => ({ value: f.id, label: f.name }))} {...bind('substituteId')} />
+          )}
+          <Input label="Reason (optional)" required={false} {...bind('reason')} />
+        </div>
+        <div className="row mt-3">
+          <Button variant="primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save change'}</Button>
+          <Button disabled={busy} onClick={restore}>Back to normal for this date</Button>
           <Button onClick={() => onClose(false)}>Cancel</Button>
         </div>
       </form>

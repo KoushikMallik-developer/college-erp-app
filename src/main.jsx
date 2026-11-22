@@ -6,6 +6,9 @@ import App from './app/App';
 import { ToastProvider } from './components/ui';
 import '@fontsource-variable/inter';
 import './styles/app.css';
+import { watchErrors } from './lib/report';
+
+watchErrors();
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>

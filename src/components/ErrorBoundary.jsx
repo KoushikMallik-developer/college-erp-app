@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import { Button } from './ui';
+import { report } from '../lib/report';
 
 // Without this, any error while a screen draws (or a screen file that no longer exists after a new deploy)
 // leaves a blank page with no way out.
@@ -10,9 +11,10 @@ export default class ErrorBoundary extends Component {
     return { failed: true };
   }
 
-  // React does not print errors a boundary catches in production, and there is no monitoring service yet.
+  // React does not print errors a boundary catches in production, so print and report them.
   componentDidCatch(error) {
     console.error('Screen error at', window.location.pathname, error);
+    report(error);
   }
 
   render() {

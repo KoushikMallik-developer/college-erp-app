@@ -25,9 +25,11 @@ service cloud.firestore {
     function libOps(iid, lid) { return libStaff(iid, lid) && libraryOn(iid, lid); }
     function isFaculty(iid) { return tenantOk(iid) && role() == 'FACULTY'; }
     function isStudent(iid) { return tenantOk(iid) && role() == 'STUDENT'; }
+    // A parent's login is tied to one student (users/{uid}.studentId, the same field a student has) and can only read.
+    function isWard(iid) { return tenantOk(iid) && role() in ['STUDENT', 'PARENT']; }
     // Roles the caller may create or change. Nobody can grant SUPER_ADMIN or PLATFORM_ADMIN here.
     function manageable(r) {
-      return r in ['FACULTY', 'STUDENT', 'LIBRARIAN'] || (role() == 'SUPER_ADMIN' && r == 'COLLEGE_ADMIN');
+      return r in ['FACULTY', 'STUDENT', 'LIBRARIAN', 'PARENT'] || (role() == 'SUPER_ADMIN' && r == 'COLLEGE_ADMIN');
     }
     // The audit entry must be created in this batch; an old entry cannot be reused.
     function newAudit(iid, id) {
@@ -142,7 +144,7 @@ service cloud.firestore {
       }
 
       match /students/{studentId} {
-        allow read: if isAdmin(iid) || (isStudent(iid) && me().studentId == studentId);
+        allow read: if isAdmin(iid) || (isWard(iid) && me().studentId == studentId);
         allow get: if isLibrarian(iid) && libraryOn(iid, me().libraryId);
         allow create: if isAdmin(iid)
           && request.resource.data.enrollmentKey == request.resource.data.enrollmentNumber.upper().trim()
@@ -196,7 +198,7 @@ service cloud.firestore {
 
       match /enrollments/{id} {
         allow read: if isAdmin(iid) || isFaculty(iid)
-          || (isStudent(iid) && resource.data.studentId == me().studentId);
+          || (isWard(iid) && resource.data.studentId == me().studentId);
         allow write: if isAdmin(iid);
       }
 
@@ -406,6 +408,63 @@ service cloud.firestore {
         allow delete: if isAdmin(iid);
       }
 
+      // Assignments: a teacher posts a task for a class they teach; students hand in by pasting a link (Spark has no file storage
+      // beyond the 900 KB slots). A submission id is taskId_studentId, so a student has one, and may replace it.
+      match /tasks/{id} {
+        function ownsTask(d) { return isFaculty(iid) && d.facultyId == me().facultyId; }
+        function validTask() {
+          let d = request.resource.data;
+          return d.title is string && d.title.size() > 0 && d.title.size() <= 120
+            && d.details is string && d.details.size() <= 2000
+            && d.dueDate is string && d.dueDate.size() == 10
+            && (!('linkUrl' in d) || d.linkUrl == null || (d.linkUrl is string && d.linkUrl.matches('https://.*') && d.linkUrl.size() <= 500));
+        }
+        allow read: if tenantOk(iid);
+        allow create: if validTask() && (isAdmin(iid)
+          || (ownsTask(request.resource.data) && assignment(request.resource.data.assignmentId).facultyId == me().facultyId
+              && assignment(request.resource.data.assignmentId).active == true));
+        // No update: the app never edits a task, so a later edit could only dodge validTask().
+        allow delete: if isAdmin(iid) || ownsTask(resource.data);
+      }
+
+      match /submissions/{id} {
+        function validSubmission() {
+          let d = request.resource.data;
+          let task = get(/databases/$(database)/documents/institutions/$(iid)/tasks/$(d.taskId)).data;
+          return d.studentId == me().studentId && id == d.taskId + '_' + d.studentId
+            && get(/databases/$(database)/documents/institutions/$(iid)/enrollments/$(d.studentId + '_' + task.semesterId)).data.sectionId == task.sectionId
+            && d.studentName == get(/databases/$(database)/documents/institutions/$(iid)/students/$(me().studentId)).data.name
+            && d.url is string && d.url.matches('https://.*') && d.url.size() <= 500
+            && d.note is string && d.note.size() <= 500;
+        }
+        allow read: if isAdmin(iid)
+          || (isWard(iid) && resource.data.studentId == me().studentId)
+          || (isFaculty(iid) && get(/databases/$(database)/documents/institutions/$(iid)/tasks/$(resource.data.taskId)).data.facultyId == me().facultyId);
+        allow create, update: if isStudent(iid) && validSubmission();
+      }
+
+      // The fee ledger: entries are never edited or removed. A mistake is corrected by a new entry.
+      match /fees/{id} {
+        allow read: if isAdmin(iid) || (isWard(iid) && resource.data.studentId == me().studentId);
+        allow create: if isAdmin(iid) && newAudit(iid, request.resource.data.auditId)
+          && request.resource.data.type in ['CHARGE', 'PAYMENT']
+          && request.resource.data.amount is number && request.resource.data.amount > 0 && request.resource.data.amount <= 10000000
+          && request.resource.data.studentId is string && request.resource.data.date is string && request.resource.data.date.size() == 10
+          && request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 120;
+      }
+
+      // One-day changes to the timetable: a cancelled class, or a substitute teacher. The id is date_slotId.
+      match /timetableChanges/{id} {
+        allow read: if tenantOk(iid);
+        allow create, update: if isAdmin(iid)
+          && request.resource.data.date is string && request.resource.data.slotId is string
+          && id == request.resource.data.date + '_' + request.resource.data.slotId
+          && request.resource.data.type in ['CANCELLED', 'SUBSTITUTE']
+          && (request.resource.data.type == 'CANCELLED' || (request.resource.data.substituteFacultyId is string
+            && request.resource.data.substituteFacultyId != request.resource.data.facultyId));
+        allow delete: if isAdmin(iid);
+      }
+
       // The student must be enrolled in the section being marked (and not withdrawn). One lookup per new record.
       function enrolledIn(studentId, semesterId, sectionId) {
         let e = get(/databases/$(database)/documents/institutions/$(iid)/enrollments/$(studentId + '_' + semesterId)).data;
@@ -422,7 +481,7 @@ service cloud.firestore {
       match /studentAttendance/{id} {
         allow read: if isAdmin(iid)
           || (isFaculty(iid) && resource.data.facultyId == me().facultyId)
-          || (isStudent(iid) && resource.data.studentId == me().studentId);
+          || (isWard(iid) && resource.data.studentId == me().studentId);
         allow create: if isFaculty(iid)
           && request.resource.data.facultyId == me().facultyId
           && id == request.resource.data.studentId + '_' + request.resource.data.assignmentId
@@ -513,7 +572,7 @@ service cloud.firestore {
       match /results/{id} {
         // IDs are {examId}_{studentId}. A student can fetch only their own result by ID, and only once the
         // exam is published. Deciding from the ID (not the document) also works when no result exists.
-        allow get: if isAdmin(iid) || (isStudent(iid)
+        allow get: if isAdmin(iid) || (isWard(iid)
           && id == id.split('_')[0] + '_' + me().studentId
           && get(/databases/$(database)/documents/institutions/$(iid)/exams/$(id.split('_')[0])).data.status == 'PUBLISHED');
         allow list: if isAdmin(iid);

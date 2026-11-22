@@ -25,7 +25,7 @@ export default function Profile() {
         </Button>{' '}
         <Button onClick={() => setChanging(true)}>Change password</Button>
       </div>
-      {role !== ROLES.LIBRARIAN && <div className="card">
+      {role !== ROLES.LIBRARIAN && role !== ROLES.PARENT && <div className="card">
         <h2>My documents</h2>
         {role === ROLES.FACULTY
           ? <FilePanel collection={collection} ownerId={ownerId} canUpload />

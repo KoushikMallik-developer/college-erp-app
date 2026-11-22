@@ -3,16 +3,16 @@ import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { query, serverTimestamp, where, writeBatch } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useCtx } from '../../app/AuthProvider';
-import { ROLES, tcol, tdoc } from '../../lib/tenant';
+import { ROLES, isWardRole, tcol, tdoc } from '../../lib/tenant';
 import { audit } from '../../lib/audit';
-import { STATUSES, attendanceBySubject, attendanceEntries, groupByCost, percent, planAttendanceWrites, recordKey, toCsv } from '../../lib/calc';
+import { MIN_ATTENDANCE, STATUSES, attendanceAdvice, attendanceBySubject, attendanceEntries, defaultPeriod, groupByCost, percent, periodChoices, planAttendanceWrites, recordKey, toCsv } from '../../lib/calc';
 import { byId, list } from '../../lib/data';
 import { searchPeople } from '../../components/SearchPalette';
 import { Alert, Badge, Button, Input, Loading, PageHeader, Select, Table, Tabs, downloadCsv, useAction, useAsync, linkBtn, linkList } from '../../components/ui';
 
 export default function Attendance() {
   const { role } = useCtx();
-  if (role === ROLES.STUDENT) return <><PageHeader title="My attendance" /><MyAttendance /></>;
+  if (isWardRole(role)) return <><PageHeader title={role === ROLES.PARENT ? 'Attendance' : 'My attendance'} /><MyAttendance /></>;
   if (role === ROLES.FACULTY) return <><PageHeader title="Attendance" /><ClassRegister /></>;
   return <AdminAttendance />;
 }
@@ -47,26 +47,32 @@ function StatusButtons({ value, onChange }) {
 const PERIODS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 function ClassRegister() {
-  const { iid, uid, profile, today } = useCtx();
+  const { iid, uid, profile, today, now } = useCtx();
   const [assignmentId, setAssignmentId] = useState('');
   const [date, setDate] = useState(today());
-  const [period, setPeriod] = useState('1');
-  const assignments = useAsync(
-    () => list(query(tcol(iid, 'teachingAssignments'), where('facultyId', '==', profile.facultyId), where('active', '==', true))),
-    [iid],
-  );
+  const [picked, setPicked] = useState('');
+  const assignments = useAsync(async () => {
+    const [classes, slots] = await Promise.all([
+      list(query(tcol(iid, 'teachingAssignments'), where('facultyId', '==', profile.facultyId), where('active', '==', true))),
+      list(query(tcol(iid, 'timetableSlots'), where('facultyId', '==', profile.facultyId))).catch(() => []), // no timetable access: plain 1-8
+    ]);
+    return { classes, slots };
+  }, [iid]);
   if (assignments.loading) return <Loading />;
-  const a = assignments.data.find((x) => x.id === assignmentId);
+  const { classes, slots } = assignments.data ?? { classes: [], slots: [] };
+  const a = classes.find((x) => x.id === assignmentId);
+  const choices = a && date ? periodChoices(slots, a.id, date) : [];
+  const period = choices.some((c) => c.value === picked) ? picked : choices.length ? defaultPeriod(choices, date === today(), now().minutes) : '1';
   return (
     <>
       <Alert kind="error">{assignments.error?.message}</Alert>
       <div className="row mb-3">
-        <Select label="Class" value={assignmentId} onChange={setAssignmentId}
-          options={assignments.data.map((x) => ({ value: x.id, label: x.subjectName }))} />
-        <Input label="Date" type="date" max={today()} value={date} onChange={setDate} />
-        <Select label="Period" value={period} onChange={setPeriod} options={PERIODS.map((p) => ({ value: String(p), label: String(p) }))} />
+        <Select label="Class" value={assignmentId} onChange={(v) => { setAssignmentId(v); setPicked(''); }}
+          options={classes.map((x) => ({ value: x.id, label: x.subjectName }))} />
+        <Input label="Date" type="date" max={today()} value={date} onChange={(v) => { setDate(v); setPicked(''); }} />
+        <Select label="Period" value={period} onChange={setPicked} options={choices.length ? choices : PERIODS.map((p) => ({ value: String(p), label: String(p) }))} />
       </div>
-      {assignments.data.length === 0 && <Alert kind="info">You have no active classes. Ask an admin to assign you to one.</Alert>}
+      {classes.length === 0 && <Alert kind="info">You have no active classes. Ask an admin to assign you to one.</Alert>}
       {a && date && <Register key={`${a.id}${date}${period}`} a={a} date={date} period={Number(period)} ctx={{ iid, uid }} />}
     </>
   );
@@ -300,6 +306,7 @@ function Reports() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [find, setFind] = useState('');
+  const [lowOnly, setLowOnly] = useState(false);
   const assignments = useAsync(() => list(tcol(iid, 'teachingAssignments')), [iid]);
   const report = useAsync(async () => {
     if (!assignmentId) return null;
@@ -319,7 +326,8 @@ function Reports() {
       const t = Object.values(attendanceBySubject([filtered]))[0] ?? { present: 0, absent: 0, leave: 0, percent: null };
       return { id: e.studentId, enrollmentNumber: e.enrollmentNumber, name: e.studentName, ...t };
     })
-    .filter((r) => !find || `${r.enrollmentNumber} ${r.name}`.toLowerCase().includes(find.toLowerCase()));
+    .filter((r) => !find || `${r.enrollmentNumber} ${r.name}`.toLowerCase().includes(find.toLowerCase()))
+    .filter((r) => !lowOnly || (r.percent !== null && r.percent < MIN_ATTENDANCE));
 
   const csv = () =>
     downloadCsv('attendance.csv', toCsv([
@@ -335,9 +343,12 @@ function Reports() {
         <Input label="From" type="date" value={from} onChange={setFrom} />
         <Input label="To" type="date" value={to} onChange={setTo} />
         <Input label="Find student" value={find} onChange={setFind} />
+        <Button onClick={() => setLowOnly(!lowOnly)} aria-pressed={lowOnly} variant={lowOnly ? 'primary' : undefined}>Under {MIN_ATTENDANCE}% only</Button>
         <Button onClick={csv} disabled={!rows.length}>Export CSV</Button>
+        <Button onClick={() => window.print()} disabled={!rows.length}>Print</Button>
       </div>
       <Alert kind="error">{report.error?.message}</Alert>
+      {assignmentId && <p className="hidden print:block">{assignments.data?.find((a) => a.id === assignmentId)?.subjectName} · {from || 'start'} to {to || 'today'}{lowOnly ? ` · under ${MIN_ATTENDANCE}%` : ''}</p>}
       {report.loading && assignmentId ? <Loading /> : (
         <Table
           rows={rows}
@@ -356,6 +367,15 @@ function Reports() {
 
 const STATUS_LOOK = { PRESENT: ['ok', 'Present'], ABSENT: ['bad', 'Absent'], LEAVE: ['warn', 'Leave'] };
 const longDate = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+// "Attend the next 4 classes to get back to 75%" or "You can miss 2 more classes and stay above 75%".
+function AdviceLine({ present, absent }) {
+  const a = attendanceAdvice(present, absent);
+  if (!a) return null;
+  return a.ok
+    ? <span className="text-xs font-medium text-ok">{a.spare > 0 ? `You can miss ${a.spare} more ${a.spare === 1 ? 'class' : 'classes'} and stay above ${MIN_ATTENDANCE}%` : `Do not miss the next class to stay above ${MIN_ATTENDANCE}%`}</span>
+    : <span className="text-xs font-semibold text-bad">Attend the next {a.need} {a.need === 1 ? 'class' : 'classes'} in a row to get back to {MIN_ATTENDANCE}%</span>;
+}
 
 // One card per subject; a click opens that subject's marks date by date.
 function MyAttendance() {
@@ -388,6 +408,7 @@ function MyAttendance() {
             {current.percent === null ? 'No percentage yet' : <Badge kind={current.percent < 75 ? 'bad' : 'ok'}>{current.percent}%</Badge>}{' '}
             {current.present} present · {current.absent} absent · {current.leave} leave
           </p>
+          <p className="mb-0"><AdviceLine present={current.present} absent={current.absent} /></p>
         </div>
         <Table
           rows={current.entries}
@@ -416,6 +437,7 @@ function MyAttendance() {
               <span className={`text-[32px] leading-none font-[650] tracking-[-1px] tabular-nums ${low ? 'text-bad' : 'text-ok'}`}>{r.percent === null ? '—' : `${r.percent}%`}</span>
               <span className="h-1.5 overflow-hidden rounded-full bg-line" aria-hidden="true"><i className={`block h-full rounded-full ${low ? 'bg-bad' : 'bg-ok'}`} style={{ width: `${r.percent ?? 0}%` }} /></span>
               <span className="muted">{r.present} present · {r.absent} absent · {r.leave} leave</span>
+              <AdviceLine present={r.present} absent={r.absent} />
             </button>
           );
         })}

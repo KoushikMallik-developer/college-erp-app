@@ -1,6 +1,6 @@
 import { Suspense, lazy, useState } from 'react';
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { BookOpen, CalendarDays, ClipboardCheck, Clock, FileText, GraduationCap, History, LayoutDashboard, Library as LibraryIcon, LogOut, Megaphone, Menu, MessageSquare, Settings as SettingsIcon, ShieldCheck, UserRound, Users as UsersIcon } from 'lucide-react';
+import { BookOpen, CalendarDays, ClipboardList, Wallet, ClipboardCheck, Clock, FileText, GraduationCap, History, LayoutDashboard, Library as LibraryIcon, LogOut, Megaphone, Menu, MessageSquare, Settings as SettingsIcon, ShieldCheck, UserRound, Users as UsersIcon } from 'lucide-react';
 import BrandMark from '../components/BrandMark';
 import { useCtx } from './AuthProvider';
 import LiveProvider from './LiveProvider';
@@ -9,7 +9,7 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import Bell from '../components/Bell';
 import SearchPalette from '../components/SearchPalette';
 import { OfflineBanner, ThemeToggle } from '../components/widgets';
-import { ROLES, isAdminRole } from '../lib/tenant';
+import { ROLES, isAdminRole, isWardRole } from '../lib/tenant';
 import Login from '../features/auth/Login';
 import { ClassWatcher } from '../features/dashboard/ClassNow';
 const Landing = lazy(() => import('../features/landing/Landing'));
@@ -32,6 +32,8 @@ const Profile = lazy(() => import('../features/users/Profile'));
 const Calendar = lazy(() => import('../features/calendar/Calendar'));
 const Requests = lazy(() => import('../features/requests/Requests'));
 const Library = lazy(() => import('../features/library/Library'));
+const Assignments = lazy(() => import('../features/assignments/Assignments'));
+const Fees = lazy(() => import('../features/fees/Fees'));
 
 function navFor(role) {
   if (role === ROLES.PLATFORM_ADMIN) return [['/dashboard', 'Colleges'], ['/admins', 'Platform admins']];
@@ -41,21 +43,24 @@ function navFor(role) {
       ...common,
       ['/students', 'Students'], ['/faculty', 'Faculty'], ['/academics', 'Academics'],
       ['/timetable', 'Timetable'], ['/attendance', 'Attendance'], ['/exams', 'Exams'],
-      ['/materials', 'Class materials'], ['/library', 'Library'], ['/calendar', 'Calendar'], ['/requests', 'Requests'], ['/announcements', 'Announcements'], ['/users', 'Users & audit'],
+      ['/assignments', 'Assignments'], ['/materials', 'Class materials'], ['/fees', 'Fees'], ['/library', 'Library'], ['/calendar', 'Calendar'], ['/requests', 'Requests'], ['/announcements', 'Announcements'], ['/users', 'Users & audit'],
       ...(role === ROLES.SUPER_ADMIN ? [['/settings', 'College settings']] : []),
     ];
   }
   if (role === ROLES.FACULTY) {
     return [
-      ...common, ['/attendance', 'Attendance'], ['/exams', 'Marks entry'], ['/materials', 'Class materials'], ['/library', 'Library'],
+      ...common, ['/attendance', 'Attendance'], ['/exams', 'Marks entry'], ['/assignments', 'Assignments'], ['/materials', 'Class materials'], ['/library', 'Library'],
       ['/timetable', 'My timetable'], ['/calendar', 'Calendar'], ['/requests', 'My requests'], ['/announcements', 'Announcements'], ['/profile', 'My profile'],
     ];
   }
   if (role === ROLES.LIBRARIAN) {
     return [...common, ['/library', 'Library'], ['/calendar', 'Calendar'], ['/announcements', 'Announcements'], ['/profile', 'My profile']];
   }
+  if (role === ROLES.PARENT) {
+    return [...common, ['/attendance', 'Attendance'], ['/exams', 'Results'], ['/timetable', 'Timetable'], ['/fees', 'Fees'], ['/calendar', 'Calendar'], ['/announcements', 'Announcements'], ['/profile', 'My profile']];
+  }
   return [
-    ...common, ['/attendance', 'My attendance'], ['/exams', 'My results'], ['/materials', 'Class materials'], ['/library', 'Library'],
+    ...common, ['/attendance', 'My attendance'], ['/exams', 'My results'], ['/assignments', 'Assignments'], ['/fees', 'My fees'], ['/materials', 'Class materials'], ['/library', 'Library'],
     ['/timetable', 'Timetable'], ['/calendar', 'Calendar'], ['/requests', 'My requests'], ['/announcements', 'Announcements'], ['/profile', 'My profile'],
   ];
 }
@@ -64,7 +69,7 @@ function navFor(role) {
 const NAV_META = {
   '/dashboard': [LayoutDashboard, 'WORKSPACE'], '/students': [UsersIcon, 'ACADEMICS'], '/faculty': [UserRound, 'ACADEMICS'],
   '/academics': [BookOpen, 'ACADEMICS'], '/timetable': [Clock, 'ACADEMICS'], '/attendance': [ClipboardCheck, 'ACADEMICS'],
-  '/exams': [GraduationCap, 'ACADEMICS'], '/materials': [FileText, 'CAMPUS LIFE'], '/library': [LibraryIcon, 'CAMPUS LIFE'],
+  '/exams': [GraduationCap, 'ACADEMICS'], '/assignments': [ClipboardList, 'ACADEMICS'], '/fees': [Wallet, 'CAMPUS LIFE'], '/materials': [FileText, 'CAMPUS LIFE'], '/library': [LibraryIcon, 'CAMPUS LIFE'],
   '/calendar': [CalendarDays, 'CAMPUS LIFE'], '/requests': [MessageSquare, 'CAMPUS LIFE'], '/announcements': [Megaphone, 'CAMPUS LIFE'],
   '/profile': [UserRound, 'CAMPUS LIFE'], '/users': [History, 'ADMINISTRATION'], '/settings': [SettingsIcon, 'ADMINISTRATION'], '/admins': [ShieldCheck, 'ADMINISTRATION'],
 };
@@ -157,10 +162,12 @@ function Shell() {
               <Route path="/timetable" element={<Timetable />} />
               <Route path="/attendance" element={<Attendance />} />
               <Route path="/exams" element={<Exams />} />
-              <Route path="/materials" element={<Materials />} />
+              {role !== ROLES.PARENT && <Route path="/materials" element={<Materials />} />}
               <Route path="/announcements" element={<Announcements />} />
               <Route path="/calendar" element={<Calendar />} />
-              <Route path="/library" element={<Library />} />
+              {role !== ROLES.PARENT && <Route path="/library" element={<Library />} />}
+              {role !== ROLES.PARENT && role !== ROLES.LIBRARIAN && <Route path="/assignments" element={<Assignments />} />}
+              {role !== ROLES.LIBRARIAN && <Route path="/fees" element={<Fees />} />}
               {(admin || role === ROLES.STUDENT || role === ROLES.FACULTY) && <Route path="/requests" element={<Requests />} />}
               {admin && <Route path="/students" element={<Students />} />}
               {admin && <Route path="/students/:id" element={<StudentDetail />} />}

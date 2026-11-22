@@ -4,7 +4,7 @@ import { doc, getAggregateFromServer, getCountFromServer, getDoc, limit, orderBy
 import { db } from '../../lib/firebase';
 import { useCtx } from '../../app/AuthProvider';
 import { tcol, isAdminRole, ROLES } from '../../lib/tenant';
-import { attendanceBySubject, attendanceStreak, percent } from '../../lib/calc';
+import { MIN_ATTENDANCE, attendanceAdvice, attendanceBySubject, attendanceStreak, percent } from '../../lib/calc';
 import { byId, list } from '../../lib/data';
 import { Alert, Badge, Loading, PageHeader, useAsync, agendaDate, agendaList } from '../../components/ui';
 import { Bars, Mascot, Ring, greeting } from '../../components/widgets';
@@ -97,6 +97,34 @@ const BADGES = [
   ['Steady', 'Attendance of 90% or more', (d) => d.overall !== null && d.overall >= 90],
   ['On a roll', 'Five days present in a row', (d) => d.streak >= 5],
 ];
+// A parent's page: their child's attendance and what is on today, read-only.
+function ParentHome() {
+  const { iid, profile } = useCtx();
+  const { data, loading, error } = useAsync(async () => {
+    const [student, docs] = await Promise.all([
+      getDoc(doc(db, 'institutions', iid, 'students', profile.studentId)),
+      list(query(tcol(iid, 'studentAttendance'), where('studentId', '==', profile.studentId))),
+    ]);
+    const t = Object.values(attendanceBySubject(docs));
+    const present = t.reduce((n, x) => n + x.present, 0), absent = t.reduce((n, x) => n + x.absent, 0);
+    return { name: student.data()?.name ?? 'your child', overall: percent(present, absent), advice: attendanceAdvice(present, absent) };
+  }, [iid]);
+  if (loading) return <Loading />;
+  if (error) return <Alert kind="error">{error.message}</Alert>;
+  const a = data.advice;
+  return (
+    <section className="card flex flex-wrap items-center gap-6 px-[26px] py-[22px]">
+      <div className="min-w-[230px] flex-1">
+        <h1 className="mb-1.5 text-[clamp(22px,3vw,30px)]">{greeting()}, {profile.displayName.split(' ')[0]}</h1>
+        <p className="muted mt-0">You are viewing {data.name}'s records.</p>
+        {a && <p className={a.ok ? 'text-ok' : 'text-bad'}>{a.ok ? 'Attendance is on track.' : `Attendance is under ${MIN_ATTENDANCE}%. ${data.name} needs to attend the next ${a.need} ${a.need === 1 ? 'class' : 'classes'} in a row.`}</p>}
+        {!a && <p className="muted">No attendance has been recorded yet.</p>}
+      </div>
+      <Ring value={data.overall} label="Overall attendance" />
+    </section>
+  );
+}
+
 const TILES = [
   ['/attendance', 'My attendance', ClipboardCheck],
   ['/exams', 'My results', FileText],
@@ -122,15 +150,15 @@ function StudentHome() {
       const marks = docs.flatMap((d) => Object.entries(d.records ?? {}).filter(([k]) => k.startsWith(tag)).map(([, v]) => v));
       return { key: date, pct: percent(marks.filter((v) => v === 'PRESENT').length, marks.filter((v) => v === 'ABSENT').length), label: new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short' }), now: date === today(), title: `${date}: ${marks.length ? `${marks.length} classes` : 'no classes'}` };
     });
-    return { overall: percent(sum('present'), sum('absent')), dayBars, marked: sum('present') + sum('absent') + sum('leave'), streak: attendanceStreak(docs), subjectBars };
+    return { advice: attendanceAdvice(sum('present'), sum('absent')), overall: percent(sum('present'), sum('absent')), dayBars, marked: sum('present') + sum('absent') + sum('leave'), streak: attendanceStreak(docs), subjectBars };
   }, [iid]);
   if (loading) return <Loading />;
   if (error) return <Alert kind="error">{error.message}</Alert>;
-  const low = data.overall !== null && data.overall < 75;
+  const low = data.overall !== null && data.overall < MIN_ATTENDANCE;
   const message = data.overall === null ? 'Your attendance will show up here once your teachers take their first register.'
     : data.overall >= 90 ? 'Superstar! Your attendance is brilliant. Keep it going.'
     : data.overall >= 75 ? 'You are on track. Every class you attend keeps you there.'
-    : 'Careful: you are under 75%. Try not to miss the next few classes.';
+    : `Careful: you are under ${MIN_ATTENDANCE}%. Attend the next ${data.advice.need} ${data.advice.need === 1 ? 'class' : 'classes'} in a row to get back to ${MIN_ATTENDANCE}%.`;
   return (
     <>
       <section className="card flex flex-wrap items-center gap-6 border-brand/22 bg-brand-soft px-[26px] py-[22px]">
@@ -298,7 +326,7 @@ export default function Dashboard() {
   const { role, profile } = useCtx();
   return (
     <>
-      {role === ROLES.STUDENT ? <StudentHome /> : <PageHeader title={`Hello, ${profile.displayName}`} />}
+      {role === ROLES.STUDENT ? <StudentHome /> : role === ROLES.PARENT ? <><ParentHome /><ClassNow /></> : <PageHeader title={`Hello, ${profile.displayName}`} />}
       {isAdminRole(role) && <AdminStats />}
       {role === ROLES.FACULTY && <><ClassNow /><FacultySummary /></>}
       <div className="mb-[18px] grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4 [&>.card]:mb-0">

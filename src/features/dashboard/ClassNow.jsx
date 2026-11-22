@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { limit, query, where } from 'firebase/firestore';
 import { useCtx } from '../../app/AuthProvider';
 import { ROLES, tcol } from '../../lib/tenant';
-import { classAlerts } from '../../lib/calc';
+import { applyChanges, classAlerts } from '../../lib/calc';
 import { list } from '../../lib/data';
 import { stash } from '../../lib/stash';
 import { useToast } from '../../components/ui';
@@ -18,7 +18,7 @@ async function mySlots({ iid, uid, role, profile }) {
     let slots = [];
     if (role === ROLES.FACULTY) {
       slots = await list(query(tcol(iid, 'timetableSlots'), where('facultyId', '==', profile.facultyId)));
-    } else if (role === ROLES.STUDENT) {
+    } else if (role === ROLES.STUDENT || role === ROLES.PARENT) {
       const [e] = await list(query(tcol(iid, 'enrollments'), where('studentId', '==', profile.studentId), where('status', '==', 'ACTIVE'), limit(1)));
       if (e) slots = await list(query(tcol(iid, 'timetableSlots'), where('sectionId', '==', e.sectionId)));
     }
@@ -26,6 +26,19 @@ async function mySlots({ iid, uid, role, profile }) {
     stash.set(key, { at: Date.now(), slots });
     return slots;
   })().finally(() => { delete loading[key]; });
+  return loading[key];
+}
+
+// Today's one-day changes (cancelled class, substitute teacher). Kept for 5 minutes per tab; one read set shared by the card and the watcher.
+async function todayChanges({ iid, today }) {
+  const date = today();
+  const key = `changes:${date}`;
+  const hit = stash.get(key);
+  if (hit && Date.now() - hit.at < 5 * 60 * 1000) return hit.rows;
+  loading[key] ??= list(query(tcol(iid, 'timetableChanges'), where('date', '==', date)))
+    .then((rows) => { stash.set(key, { at: Date.now(), rows }); return rows; })
+    .catch(() => []) // no access or offline: the normal timetable still shows
+    .finally(() => { delete loading[key]; });
   return loading[key];
 }
 
@@ -45,7 +58,9 @@ function useSlots() {
   const [slots, setSlots] = useState(null);
   useEffect(() => {
     let live = true;
-    mySlots(ctx).then((s) => live && setSlots(s), () => live && setSlots([])); // no timetable access or a failed read: simply nothing to show
+    Promise.all([mySlots(ctx), todayChanges(ctx)])
+      .then(([s, changes]) => live && setSlots(applyChanges(s, changes, ctx.role === ROLES.FACULTY ? ctx.profile.facultyId : null)),
+        () => live && setSlots([])); // no timetable access or a failed read: simply nothing to show
     return () => { live = false; };
   }, [ctx.iid, ctx.uid]); // eslint-disable-line react-hooks/exhaustive-deps
   return slots;
@@ -66,6 +81,15 @@ export function ClassWatcher() {
   useEffect(() => {
     if (!slots) return;
     let rang = false;
+    // Once a day per changed class: cancelled, covered by someone else, or taken over by this person.
+    for (const s of slots) {
+      if (s.dayOfWeek !== day || !(s.off || s.substitute)) continue;
+      const key = `alert:${today()}_${s.id}_change`;
+      if (stash.get(key)) continue;
+      stash.set(key, 1);
+      const why = s.reason ? ` (${s.reason})` : '';
+      toast(s.off === 'CANCELLED' ? `Cancelled today: ${s.subjectName} at ${s.startTime}${why}` : s.off ? `${s.subjectName} at ${s.startTime} is covered by ${s.facultyName}${why}` : `${s.subjectName} at ${s.startTime} is taken by ${s.facultyName} today${why}`);
+    }
     for (const { kind, slot } of classAlerts(slots, day, minutes)) {
       const key = `alert:${today()}_${slot.id}_${kind}`; // once per class per kind, even if the page reloads
       if (stash.get(key)) continue;
@@ -86,10 +110,11 @@ export default function ClassNow() {
   if (!slots?.length) return null; // no timetable with times yet
   const today = slots.filter((s) => s.dayOfWeek === day).sort((x, y) => mins(x.startTime) - mins(y.startTime));
   if (!today.length) return null;
-  const state = (s) => (minutes >= mins(s.endTime) ? 'done' : minutes >= mins(s.startTime) ? 'live' : 'soon');
+  const state = (s) => (s.off ? 'off' : minutes >= mins(s.endTime) ? 'done' : minutes >= mins(s.startTime) ? 'live' : 'soon');
   const current = today.find((s) => state(s) === 'live');
   const next = today.find((s) => state(s) === 'soon');
   const done = today.filter((s) => state(s) === 'done').length;
+  const count = today.filter((s) => !s.off).length;
   const who = (s) => [s.facultyName, s.room && `Room ${s.room}`].filter(Boolean).join(' · ');
   const focus = current ?? next;
   const total = current ? mins(current.endTime) - mins(current.startTime) : 0;
@@ -98,7 +123,7 @@ export default function ClassNow() {
     <section className={`card relative overflow-hidden ${current ? 'border-ok!' : next && mins(next.startTime) - minutes <= 10 ? 'border-warn!' : ''}`} aria-label="Your classes today">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h2 className="m-0 mr-auto">Your classes today</h2>
-        <span className="text-xs font-medium text-muted">{done} of {today.length} done</span>
+        <span className="text-xs font-medium text-muted">{done} of {count} done</span>
       </div>
 
       {focus ? (
@@ -111,7 +136,7 @@ export default function ClassNow() {
           <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
             <div className="min-w-0">
               <div className="truncate text-[22px] leading-tight font-semibold">{focus.subjectName}</div>
-              <div className="mt-0.5 text-[13px] text-muted">{who(focus)}</div>
+              <div className="mt-0.5 text-[13px] text-muted">{who(focus)}{focus.substitute && <strong className="ml-2 text-warn">Substitute teacher</strong>}</div>
             </div>
             <div className="text-right">
               <div className="text-lg font-semibold tabular-nums">{focus.startTime} – {focus.endTime}</div>
@@ -125,19 +150,21 @@ export default function ClassNow() {
           )}
         </div>
       ) : (
-        <div className="mb-4 rounded-xl bg-ok-soft p-4 text-[14px] font-medium text-ok">All {today.length} classes are done for today.</div>
+        <div className="mb-4 rounded-xl bg-ok-soft p-4 text-[14px] font-medium text-ok">{count ? `All ${count} classes are done for today.` : 'No classes are running today.'}</div>
       )}
 
       <ol className="m-0 list-none p-0">
         {today.map((s) => {
           const st = state(s);
           return (
-            <li key={s.id} className={`flex items-center gap-3 border-t border-line py-2.5 text-[13.5px] first:border-t-0 ${st === 'done' ? 'opacity-55' : ''}`} aria-current={st === 'live' ? 'true' : undefined}>
+            <li key={s.id} className={`flex items-center gap-3 border-t border-line py-2.5 text-[13.5px] first:border-t-0 ${st === 'done' || st === 'off' ? 'opacity-55' : ''}`} aria-current={st === 'live' ? 'true' : undefined}>
               <span className={`size-2.5 flex-none rounded-full ${st === 'live' ? 'bg-ok' : st === 'soon' ? 'border-2 border-brand' : 'bg-line'}`} aria-hidden="true" />
               <span className="w-[92px] flex-none text-xs tabular-nums text-muted">{s.startTime}–{s.endTime}</span>
-              <span className={`min-w-0 flex-1 truncate ${st === 'live' ? 'font-semibold' : 'font-medium'}`}>{s.subjectName}</span>
-              {s.room && <span className="flex-none text-xs text-muted phone:hidden">Room {s.room}</span>}
-              <span className="sr-only">{st === 'live' ? 'in progress' : st === 'done' ? 'finished' : 'later today'}</span>
+              <span className={`min-w-0 flex-1 truncate ${st === 'live' ? 'font-semibold' : 'font-medium'} ${st === 'off' ? 'line-through' : ''}`}>{s.subjectName}</span>
+              {s.off && <span className="flex-none text-xs font-semibold text-bad">{s.off === 'CANCELLED' ? 'Cancelled' : `Covered by ${s.facultyName}`}</span>}
+              {s.substitute && !s.off && <span className="flex-none text-xs font-semibold text-warn">Substitute</span>}
+              {s.room && !s.off && <span className="flex-none text-xs text-muted phone:hidden">Room {s.room}</span>}
+              <span className="sr-only">{st === 'live' ? 'in progress' : st === 'done' ? 'finished' : st === 'off' ? 'not running' : 'later today'}</span>
             </li>
           );
         })}

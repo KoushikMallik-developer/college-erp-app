@@ -15,11 +15,11 @@ export default function LiveProvider({ children }) {
     if (!iid || role === ROLES.PLATFORM_ADMIN) return undefined;
     setLiveTarget({ db, iid, uid });
     let seen = false, pending = false, last = 0, wait = 0;
-    // Refresh at most every 30 s, and only while the tab is open in front: busy colleges would burn the free read quota.
+    // Refresh at most every 2 minutes, and only while the tab is open in front: busy colleges would burn the free read quota.
     const schedule = () => {
       clearTimeout(wait);
       if (!pending || document.visibilityState !== 'visible') return;
-      wait = setTimeout(() => { pending = false; last = Date.now(); setVersion((v) => v + 1); }, Math.max(800, last + 30000 - Date.now()));
+      wait = setTimeout(() => { pending = false; last = Date.now(); setVersion((v) => v + 1); }, Math.max(800, last + 120000 - Date.now()));
     };
     const stop = onSnapshot(tdoc(iid, 'meta', 'live'), () => {
       if (!seen) { seen = true; return; }

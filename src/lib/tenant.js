@@ -12,6 +12,10 @@ export const ROLES = {
   FACULTY: 'FACULTY',
   STUDENT: 'STUDENT',
   LIBRARIAN: 'LIBRARIAN',
+  PARENT: 'PARENT',
 };
+
+// A student, or a parent looking at that student's own records (the user has the same studentId field either way).
+export const isWardRole = (role) => role === ROLES.STUDENT || role === ROLES.PARENT;
 
 export const isAdminRole = (role) => role === ROLES.SUPER_ADMIN || role === ROLES.COLLEGE_ADMIN;

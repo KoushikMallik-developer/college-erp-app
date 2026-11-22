@@ -47,6 +47,17 @@ export function percent(present, absent) {
   return total === 0 ? null : Math.round((present / total) * 1000) / 10;
 }
 
+export const MIN_ATTENDANCE = 75;
+
+// What a student needs to hear: below the minimum, how many classes in a row to attend to get back to it;
+// at or above it, how many classes can still be missed. Leave is not counted, as in percent().
+export function attendanceAdvice(present, absent, target = MIN_ATTENDANCE) {
+  const total = present + absent;
+  if (!total) return null;
+  if (present * 100 >= target * total) return { ok: true, spare: Math.floor((present * 100) / target) - total };
+  return { ok: false, need: Math.ceil((target * total - 100 * present) / (100 - target)) };
+}
+
 // docs: studentAttendance documents of one student. Returns totals per subjectId.
 export function attendanceBySubject(docs) {
   const out = {};
@@ -73,6 +84,37 @@ export function attendanceEntries(docs) {
   }
   return out.sort((a, b) => b.date.localeCompare(a.date) || b.period - a.period);
 }
+
+// Grade points: [minimum percentage, points], highest first. Below the last band, or a failed paper, earns 0.
+export const DEFAULT_SCALE = [[90, 10], [80, 9], [70, 8], [60, 7], [50, 6], [40, 5]];
+
+// "90:10, 80:9, 70:8" -> [[90, 10], [80, 9], [70, 8]], or null when the text is not a clean scale.
+export function parseGradeScale(text) {
+  const bands = String(text ?? '').split(',').map((p) => p.trim().split(':').map(Number));
+  if (!bands.length || bands.some((b) => b.length !== 2 || b.some((n) => !Number.isFinite(n)) || b[0] < 0 || b[0] > 100 || b[1] < 0 || b[1] > 10)) return null;
+  const sorted = [...bands].sort((a, b) => b[0] - a[0]);
+  return new Set(sorted.map((b) => b[0])).size === sorted.length ? sorted : null;
+}
+
+// subjects: a result's [{ marks, maxMarks, passMarks, absent }]. The plain average of the papers' grade points, to two places.
+// shortcut: papers weigh the same because subjects carry no credits; add credits to weigh them when the college needs it.
+export function gpa(subjects, scale = DEFAULT_SCALE) {
+  if (!subjects.length) return null;
+  const points = subjects.map((s) => {
+    if (s.absent || s.marks < s.passMarks) return 0;
+    const pct = (s.marks / s.maxMarks) * 100;
+    return scale.find(([min]) => pct >= min)?.[1] ?? 0;
+  });
+  return Math.round((points.reduce((a, b) => a + b, 0) / points.length) * 100) / 100;
+}
+
+// results: published results, one per exam (about one per semester). CGPA is the average of their GPAs.
+export function cgpa(results, scale = DEFAULT_SCALE) {
+  const g = results.map((r) => gpa(r.subjects, scale)).filter((x) => x !== null);
+  return g.length ? Math.round((g.reduce((a, b) => a + b, 0) / g.length) * 100) / 100 : null;
+}
+
+export const scaleOf = (institution) => parseGradeScale(institution?.academicSettings?.gradeScale) ?? DEFAULT_SCALE;
 
 // papers: [{ marks, absent, maxMarks, passMarks }]. An absent paper counts as 0 and fails.
 export function computeResult(papers) {
@@ -130,11 +172,48 @@ const clockMinutes = (t) => { const [h, m] = t.split(':'); return Number(h) * 60
 
 // Which class is on now and which is next, from slots that carry startTime and endTime.
 export function classNow(slots, day, minutes) {
-  const today = slots.filter((s) => s.startTime && s.dayOfWeek === day).sort((a, b) => clockMinutes(a.startTime) - clockMinutes(b.startTime));
+  const today = slots.filter((s) => s.startTime && !s.off && s.dayOfWeek === day).sort((a, b) => clockMinutes(a.startTime) - clockMinutes(b.startTime));
   return {
     current: today.find((s) => clockMinutes(s.startTime) <= minutes && minutes < clockMinutes(s.endTime)),
     next: today.find((s) => clockMinutes(s.startTime) > minutes),
   };
+}
+
+const weekdayOf = (iso) => ((new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7) + 1; // Mon = 1, as in the timetable
+
+// The lessons a teacher has for a class on a date's weekday, from the timetable. No slots yet: all eight periods.
+export function periodChoices(slots, assignmentId, date) {
+  const mine = slots.filter((s) => s.assignmentId === assignmentId && s.dayOfWeek === weekdayOf(date)).sort((x, y) => x.period - y.period);
+  if (!mine.length) return [1, 2, 3, 4, 5, 6, 7, 8].map((p) => ({ value: String(p), label: String(p) }));
+  return mine.map((s) => ({ value: String(s.period), label: s.startTime ? `${s.period} · ${s.startTime}–${s.endTime}` : String(s.period), slot: s }));
+}
+
+// On today's date: the lesson running now, else the next one, else the last. Any other date: the first of the day.
+export function defaultPeriod(choices, isToday, minutes) {
+  const timed = choices.filter((c) => c.slot?.startTime);
+  if (!isToday || !timed.length) return choices[0].value;
+  const hit = timed.find((c) => clockMinutes(c.slot.startTime) <= minutes && minutes < clockMinutes(c.slot.endTime))
+    ?? timed.find((c) => clockMinutes(c.slot.startTime) > minutes) ?? timed.at(-1);
+  return hit.value;
+}
+
+// Today's classes for one person after one-day changes. A changed class that is no longer theirs, or is cancelled,
+// stays in the list with `off` set so it can be shown as such; classNow and classAlerts skip those.
+// `me` is the faculty id for a teacher, or null for a student (whose slots are already their own section's).
+export function applyChanges(slots, changes, me) {
+  const by = Object.fromEntries(changes.map((c) => [c.slotId, c]));
+  const out = slots.map((s) => {
+    const c = by[s.id];
+    if (!c) return s;
+    if (c.type === 'CANCELLED') return { ...s, off: 'CANCELLED', reason: c.reason };
+    if (me && c.substituteFacultyId !== me) return { ...s, off: 'COVERED', facultyName: c.substituteFacultyName, reason: c.reason };
+    return { ...s, facultyName: c.substituteFacultyName, substitute: true, reason: c.reason };
+  });
+  // A teacher covering someone else's class gets it as a normal class of their own.
+  if (me) for (const c of changes) if (c.type === 'SUBSTITUTE' && c.substituteFacultyId === me && !slots.some((s) => s.id === c.slotId)) {
+    out.push({ id: c.slotId, dayOfWeek: c.dayOfWeek, startTime: c.startTime, endTime: c.endTime, subjectName: c.subjectName, facultyName: c.substituteFacultyName, room: c.room, substitute: true, reason: c.reason });
+  }
+  return out;
 }
 
 // Messages due right now: 10 minutes before a class, in the first 5 minutes of it, and in the 5 minutes after it ends.
@@ -142,7 +221,7 @@ export function classNow(slots, day, minutes) {
 export function classAlerts(slots, day, minutes) {
   const out = [];
   for (const slot of slots) {
-    if (!slot.startTime || slot.dayOfWeek !== day) continue;
+    if (!slot.startTime || slot.off || slot.dayOfWeek !== day) continue;
     const from = clockMinutes(slot.startTime), to = clockMinutes(slot.endTime);
     if (minutes >= from - 10 && minutes < from) out.push({ kind: 'upcoming', slot });
     if (minutes >= from && minutes < from + 5) out.push({ kind: 'started', slot });
@@ -252,6 +331,36 @@ export function generateTimetable({ sectionId, requirements, days, periods, room
 }
 
 // A cell starting with = + - @ (or tab/CR) would run as a formula in Excel, so it gets a leading apostrophe.
+// Documents -> CSV rows with one column per field seen. Timestamps become dates, maps and lists become JSON text.
+export function docRows(docs) {
+  const cols = [...new Set(docs.flatMap((d) => Object.keys(d)))].sort((a, b) => (a === 'id' ? -1 : b === 'id' ? 1 : a.localeCompare(b)));
+  const cell = (v) => (v == null ? '' : typeof v.toDate === 'function' ? v.toDate().toISOString() : typeof v === 'object' ? JSON.stringify(v) : v);
+  return [cols, ...docs.map((d) => cols.map((c) => cell(d[c])))];
+}
+
+// Fee ledger entries [{ type: 'CHARGE' | 'PAYMENT', amount }] -> what was charged, what was paid, and what is still due (negative = paid ahead).
+export function feeBalance(entries) {
+  const sum = (type) => Math.round(entries.filter((e) => e.type === type).reduce((n, e) => n + e.amount * 100, 0)) / 100;
+  const charged = sum('CHARGE'), paid = sum('PAYMENT');
+  return { charged, paid, due: Math.round((charged - paid) * 100) / 100 };
+}
+
+// Everyone's ledger entries -> one row per student who still owes something, the biggest debt first.
+export function feeDebtors(entries) {
+  const by = new Map();
+  for (const e of entries) { const l = by.get(e.studentId) ?? { studentId: e.studentId, studentName: e.studentName, rows: [] }; l.rows.push(e); by.set(e.studentId, l); }
+  return [...by.values()].map((l) => ({ studentId: l.studentId, studentName: l.studentName, ...feeBalance(l.rows) })).filter((r) => r.due > 0).sort((a, b) => b.due - a.due);
+}
+
+// Whole rupees or paise only: 1200, 1200.5, 1200.55. Anything else is refused before it is saved.
+export const validAmount = (text) => /^\d{1,8}(\.\d{1,2})?$/.test(String(text).trim()) && Number(text) > 0;
+
+// A link a student or teacher may attach: https only, no spaces, short. The rules enforce the same.
+export const validLink = (text) => /^https:\/\/\S+$/.test(String(text).trim()) && String(text).trim().length <= 500;
+
+// Where a task stands for a student: handed in, overdue, or still open. Dates are YYYY-MM-DD in the college's time zone.
+export const taskState = (dueDate, today, submitted) => (submitted ? 'submitted' : dueDate < today ? 'overdue' : 'open');
+
 export const csvEscape = (v) => {
   const t = String(v ?? '');
   const risky = /^[=+\-@\t\r]/.test(t) && !/^-?\d+(\.\d+)?$/.test(t);

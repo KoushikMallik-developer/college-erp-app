@@ -16,7 +16,7 @@ export function AnnouncementList({ limitTo = 50 }) {
   );
   if (loading) return <Loading />;
   if (error) return <Alert kind="error">{error.message}</Alert>;
-  const mine = data.filter((a) => !a.audienceRoles?.length || a.audienceRoles.includes(role) || isAdminRole(role));
+  const mine = data.filter((a) => !a.audienceRoles?.length || a.audienceRoles.includes(role) || (role === ROLES.PARENT && a.audienceRoles.includes(ROLES.STUDENT)) || isAdminRole(role));
   if (!mine.length) return <p className="muted">No announcements.</p>;
   return mine.map((a) => (
     <article key={a.id} style={{ marginBottom: 12 }}>

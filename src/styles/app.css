@@ -189,4 +189,5 @@
   .card, .table-wrap { border-color: var(--field); break-inside: avoid; }
   th { position: static; }
   .table-wrap { max-height: none; overflow: visible; }
+  body[data-print=ticket] .card:not(#hall-ticket) { display: none; } /* the hall ticket button prints that card alone */
 }

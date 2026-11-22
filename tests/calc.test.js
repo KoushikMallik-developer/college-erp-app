@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitPromotion, addDays, overdueDays, toCsv, csvEscape, leaveOverlaps, parseCsv, classAlerts, classNow, generateTimetable, nowIn, periodTimes, slotLocks, attendanceBySubject, attendanceEntries, attendanceStreak, checkExam, groupByCost, computeResult, enrollmentKey, percent, planAttendanceWrites, loginEmail, recordKey, roomKey, todayIn, validTimeZone } from '../src/lib/calc';
+import { splitPromotion, addDays, overdueDays, toCsv, csvEscape, leaveOverlaps, parseCsv, applyChanges, attendanceAdvice, validLink, taskState, feeBalance, feeDebtors, validAmount, docRows, cgpa, DEFAULT_SCALE, gpa, parseGradeScale, scaleOf, classAlerts, classNow, defaultPeriod, periodChoices, generateTimetable, nowIn, periodTimes, slotLocks, attendanceBySubject, attendanceEntries, attendanceStreak, checkExam, groupByCost, computeResult, enrollmentKey, percent, planAttendanceWrites, loginEmail, recordKey, roomKey, todayIn, validTimeZone } from '../src/lib/calc';
 
 describe('attendance', () => {
   it('excludes leave from the percentage', () => {
@@ -277,5 +277,120 @@ describe('class now and alerts', () => {
   it('reads the weekday and clock in the college time zone', () => {
     // Monday 2026-11-02 23:30 UTC is already Tuesday 05:00 in Kolkata
     expect(nowIn('Asia/Kolkata', new Date('2026-11-02T23:30:00Z'))).toEqual({ day: 2, minutes: 300 });
+  });
+});
+
+describe('one-day changes', () => {
+  const slots = [
+    { id: 'a', dayOfWeek: 1, startTime: '09:00', endTime: '09:45', subjectName: 'Maths', facultyName: 'Rao' },
+    { id: 'b', dayOfWeek: 1, startTime: '10:00', endTime: '10:45', subjectName: 'Physics', facultyName: 'Iyer' },
+  ];
+  const sub = { slotId: 'a', type: 'SUBSTITUTE', substituteFacultyId: 'f2', substituteFacultyName: 'Das', reason: 'Fever' };
+  it('a cancelled class stays listed but never counts as current, next, or an alert', () => {
+    const out = applyChanges(slots, [{ slotId: 'a', type: 'CANCELLED' }], null);
+    expect(out[0].off).toBe('CANCELLED');
+    expect(classNow(out, 1, 9 * 60 + 10)).toMatchObject({ current: undefined, next: { id: 'b' } });
+    expect(classAlerts(out, 1, 9 * 60 + 2)).toEqual([]);
+  });
+  it('a student sees the substitute name; the away teacher sees it covered; the substitute gets the class', () => {
+    expect(applyChanges(slots, [sub], null)[0]).toMatchObject({ facultyName: 'Das', substitute: true });
+    expect(applyChanges(slots, [sub], 'f1')[0]).toMatchObject({ off: 'COVERED', facultyName: 'Das' });
+    const theirs = applyChanges([], [{ ...sub, dayOfWeek: 1, startTime: '09:00', endTime: '09:45', subjectName: 'Maths' }], 'f2');
+    expect(theirs).toHaveLength(1);
+    expect(classNow(theirs, 1, 9 * 60 + 10).current).toMatchObject({ subjectName: 'Maths', substitute: true });
+    expect(applyChanges([], [sub], 'f3')).toHaveLength(0); // an unrelated teacher gets nothing
+  });
+});
+
+describe('attendance period choices', () => {
+  const slots = [
+    { assignmentId: 'x', dayOfWeek: 1, period: 3, startTime: '11:00', endTime: '11:45' },
+    { assignmentId: 'x', dayOfWeek: 1, period: 1, startTime: '09:00', endTime: '09:45' },
+    { assignmentId: 'x', dayOfWeek: 2, period: 2, startTime: '10:00', endTime: '10:45' },
+  ];
+  it('lists only that class on that weekday, in order, and falls back to 1-8', () => {
+    expect(periodChoices(slots, 'x', '2026-11-02').map((c) => c.value)).toEqual(['1', '3']); // a Monday
+    expect(periodChoices(slots, 'x', '2026-11-04')).toHaveLength(8); // Wednesday: no lessons
+  });
+  it('picks the running lesson today, the next before it, the last after it, the first on other days', () => {
+    const c = periodChoices(slots, 'x', '2026-11-02');
+    expect(defaultPeriod(c, true, 9 * 60 + 10)).toBe('1');
+    expect(defaultPeriod(c, true, 10 * 60)).toBe('3');
+    expect(defaultPeriod(c, true, 15 * 60)).toBe('3');
+    expect(defaultPeriod(c, false, 11 * 60 + 10)).toBe('1');
+  });
+});
+
+describe('attendance advice', () => {
+  it('says how many classes to attend to get back to 75%, and how many can be missed above it', () => {
+    expect(attendanceAdvice(0, 0)).toBeNull();
+    expect(attendanceAdvice(6, 4)).toEqual({ ok: false, need: 6 }); // 6/10 -> 12/16 = 75%
+    expect(attendanceAdvice(8, 2)).toEqual({ ok: true, spare: 0 }); // 80%: floor(800/75)=10, 10 taken
+    expect(attendanceAdvice(9, 1)).toEqual({ ok: true, spare: 2 }); // floor(900/75)=12, 10 taken
+    const a = attendanceAdvice(6, 4); // the promise must hold: attending `need` more reaches the target
+    expect(((6 + a.need) / (10 + a.need)) * 100).toBeGreaterThanOrEqual(75);
+    expect(((6 + a.need - 1) / (10 + a.need - 1)) * 100).toBeLessThan(75);
+  });
+});
+
+describe('grade points', () => {
+  const paper = (marks, over = {}) => ({ marks, maxMarks: 100, passMarks: 40, absent: false, ...over });
+  it('reads a scale and refuses a broken one', () => {
+    expect(parseGradeScale('70:8, 90:10, 80:9')).toEqual([[90, 10], [80, 9], [70, 8]]);
+    for (const bad of ['', 'abc', '90:11', '90:10, 90:9', '101:5', '90']) expect(parseGradeScale(bad)).toBeNull();
+  });
+  it('averages the papers, and a failed or absent paper earns 0', () => {
+    expect(gpa([paper(95), paper(85)])).toBe(9.5);
+    expect(gpa([paper(95), paper(35)])).toBe(5); // 35 is under the pass mark
+    expect(gpa([paper(95), paper(0, { absent: true })])).toBe(5);
+    expect(gpa([paper(45, { passMarks: 50 })])).toBe(0); // above the 40 band but under this paper's pass mark
+    expect(gpa([])).toBeNull();
+  });
+  it('uses the college scale when it has one, and CGPA is the mean of the exams', () => {
+    expect(gpa([paper(75)], [[70, 7]])).toBe(7);
+    expect(cgpa([{ subjects: [paper(95)] }, { subjects: [paper(85)] }])).toBe(9.5);
+    expect(cgpa([])).toBeNull();
+    expect(scaleOf({ academicSettings: { gradeScale: '50:10' } })).toEqual([[50, 10]]);
+    expect(scaleOf({ academicSettings: { gradeScale: 'nonsense' } })).toEqual(DEFAULT_SCALE);
+  });
+});
+
+describe('docRows', () => {
+  it('makes one column per field, with id first, dates as text and maps as JSON', () => {
+    const rows = docRows([{ id: 'a', name: 'Asha', at: { toDate: () => new Date('2026-11-02T00:00:00Z') } }, { id: 'b', records: { d1: 'PRESENT' } }]);
+    expect(rows[0]).toEqual(['id', 'at', 'name', 'records']);
+    expect(rows[1]).toEqual(['a', '2026-11-02T00:00:00.000Z', 'Asha', '']);
+    expect(rows[2]).toEqual(['b', '', '', '{"d1":"PRESENT"}']);
+    expect(docRows([])).toEqual([[]]);
+  });
+});
+
+describe('fee ledger', () => {
+  const e = (studentId, type, amount) => ({ studentId, studentName: studentId.toUpperCase(), type, amount });
+  it('adds in paise so 0.1 + 0.2 stays 0.3, and shows a credit as negative', () => {
+    expect(feeBalance([e('a', 'CHARGE', 0.1), e('a', 'CHARGE', 0.2)])).toEqual({ charged: 0.3, paid: 0, due: 0.3 });
+    expect(feeBalance([e('a', 'CHARGE', 1000), e('a', 'PAYMENT', 400)])).toEqual({ charged: 1000, paid: 400, due: 600 });
+    expect(feeBalance([e('a', 'CHARGE', 100), e('a', 'PAYMENT', 150)]).due).toBe(-50);
+    expect(feeBalance([])).toEqual({ charged: 0, paid: 0, due: 0 });
+  });
+  it('lists only students who owe, biggest first', () => {
+    const rows = feeDebtors([e('a', 'CHARGE', 500), e('b', 'CHARGE', 900), e('b', 'PAYMENT', 100), e('c', 'CHARGE', 50), e('c', 'PAYMENT', 50)]);
+    expect(rows.map((r) => [r.studentId, r.due])).toEqual([['b', 800], ['a', 500]]);
+  });
+  it('accepts money with at most two decimals and refuses the rest', () => {
+    for (const ok of ['1', '1200', '1200.5', '1200.55']) expect(validAmount(ok)).toBe(true);
+    for (const bad of ['', '0', '-5', '12.345', 'abc', '1e5', '123456789']) expect(validAmount(bad)).toBe(false);
+  });
+});
+
+describe('assignment links and state', () => {
+  it('accepts https links only', () => {
+    expect(validLink('https://drive.google.com/file/d/abc/view')).toBe(true);
+    for (const bad of ['', 'http://x.com/a', 'javascript:alert(1)', 'https://', 'https://a b.com', `https://x.com/${'a'.repeat(500)}`]) expect(validLink(bad)).toBe(false);
+  });
+  it('says submitted, overdue or open', () => {
+    expect(taskState('2026-11-05', '2026-11-06', true)).toBe('submitted');
+    expect(taskState('2026-11-05', '2026-11-06', false)).toBe('overdue');
+    expect(taskState('2026-11-06', '2026-11-06', false)).toBe('open'); // due today still counts
   });
 });
