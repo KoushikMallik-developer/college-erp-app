@@ -102,8 +102,8 @@ function Shell() {
   const roleName = role.replace('_', ' ').toLowerCase();
   return (
     <div className="min-h-dvh">
-      <aside className={`fixed inset-y-0 left-0 z-(--z-drawer) flex w-[248px] flex-col bg-panel px-4 pt-7 text-panel-text print:hidden ${collapsed ? 'desk:invisible desk:-translate-x-full' : ''} ${open ? '' : 'phone:-translate-x-full'} motion-safe:phone:transition-transform motion-safe:phone:duration-200`}>
-        <div className="flex items-center gap-[11px] px-3 text-[19px] leading-[1.15] font-bold tracking-[-.6px] text-white"><BrandMark size={36} /><span>Techomato Colleges</span></div>
+      <aside className={`fixed inset-y-0 left-0 z-(--z-drawer) sidebar flex w-[248px] flex-col border-r border-panel-line bg-panel px-4 pt-7 text-panel-text print:hidden ${collapsed ? 'desk:invisible desk:-translate-x-full' : ''} ${open ? '' : 'phone:-translate-x-full'} motion-safe:phone:transition-transform motion-safe:phone:duration-200`}>
+        <div className="flex items-center gap-[11px] px-3 text-[19px] leading-[1.15] font-bold tracking-[-.6px] text-panel-strong"><BrandMark size={36} /><span>Techomato Colleges</span></div>
         <div className="mt-6 mb-1 flex items-center gap-2.5 rounded-[9px] border border-panel-line bg-panel-2 px-2.5 py-3">
           <span className="grid size-8 flex-none place-items-center rounded-[7px] border border-panel-edge font-bold text-panel-strong">{(institution?.name ?? 'T')[0]}</span>
           <div><strong className="block text-xs font-semibold text-panel-strong [overflow-wrap:anywhere]">{institution?.name ?? 'Platform'}</strong><small className="mt-0.5 block text-xs text-panel-muted capitalize">{roleName}</small></div>
@@ -115,7 +115,7 @@ function Shell() {
             return (
               <div key={to}>
                 {group && group !== prev && <div className="mx-3 mt-[22px] mb-2 text-[11px] font-bold tracking-[1.5px] text-panel-muted">{group}</div>}
-                <NavLink to={to} onClick={() => setOpen(false)} className={({ isActive }) => `${SIDE_LINK} ${isActive ? 'bg-brand text-white shadow-[0_3px_12px_var(--shade)]' : 'text-panel-text hover:bg-panel-hover hover:text-white'}`}><NavIcon size={18} /><span>{label}</span></NavLink>
+                <NavLink to={to} onClick={() => setOpen(false)} className={({ isActive }) => `${SIDE_LINK} ${isActive ? 'bg-brand text-white shadow-[0_3px_12px_var(--shade)]' : 'text-panel-text hover:bg-panel-hover hover:text-panel-strong'}`}><NavIcon size={18} /><span>{label}</span></NavLink>
               </div>
             );
           })}
@@ -123,7 +123,7 @@ function Shell() {
         <div className="flex items-center gap-2.5 border-t border-panel-line px-2.5 py-4 text-[11px] text-panel-muted">
           <span className={`${AVATAR} border-panel-line bg-panel-2 text-panel-strong`}>{initials}</span>
           <div className="min-w-0 flex-1"><strong className="block truncate text-xs font-semibold text-panel-strong">{profile.displayName}</strong><span className="capitalize">{roleName}</span></div>
-          <button type="button" className={`${iconBtnBase} text-panel-text hover:bg-panel-hover hover:text-white`} onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
+          <button type="button" className={`${iconBtnBase} text-panel-text hover:bg-panel-hover hover:text-panel-strong`} onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
         </div>
       </aside>
       <nav className="fixed inset-x-0 bottom-0 z-(--z-tabbar) hidden border-t border-line bg-card pb-[env(safe-area-inset-bottom)] phone:flex print:hidden" aria-label="Quick links">
