@@ -43,7 +43,7 @@ function navFor(role) {
       ...common,
       ['/students', 'Students'], ['/faculty', 'Faculty'], ['/academics', 'Academics'],
       ['/timetable', 'Timetable'], ['/attendance', 'Attendance'], ['/exams', 'Exams'],
-      ['/assignments', 'Assignments'], ['/materials', 'Class materials'], ['/fees', 'Fees'], ['/library', 'Library'], ['/calendar', 'Calendar'], ['/requests', 'Requests'], ['/announcements', 'Announcements'], ['/users', 'Users & audit'],
+      ['/assignments', 'Assignments'], ['/materials', 'Class materials'], ['/fees', 'Fees'], ['/library', 'Library'], ['/calendar', 'Calendar'], ['/requests', 'Leave requests'], ['/announcements', 'Announcements'], ['/users', 'Users & audit'],
       ...(role === ROLES.SUPER_ADMIN ? [['/settings', 'College settings']] : []),
     ];
   }

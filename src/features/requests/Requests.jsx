@@ -10,6 +10,8 @@ const KIND = { LEAVE: 'Leave', GRIEVANCE: 'Concern' };
 const TONE = { PENDING: 'warn', APPROVED: 'ok', RESOLVED: 'ok', REJECTED: 'bad', REVOKED: 'bad', CANCELLED: '' };
 const when = (t) => t?.toDate?.().toLocaleDateString() ?? '';
 const dates = (r) => (r.kind === 'LEAVE' ? (r.fromDate === r.toDate ? r.fromDate : `${r.fromDate} to ${r.toDate}`) : '');
+// Calendar days the leave covers, first and last day included.
+const duration = (r) => { if (r.kind !== 'LEAVE') return ''; const n = (Date.parse(r.toDate) - Date.parse(r.fromDate)) / 864e5 + 1; return `${n} day${n === 1 ? '' : 's'}`; };
 
 export default function Requests() {
   const { role } = useCtx();
@@ -122,22 +124,24 @@ function Inbox() {
   );
   return (
     <>
-      <PageHeader title="Requests">
-        <Button disabled={!data?.length} onClick={() => downloadCsv('requests.csv', toCsv([['From', 'Type', 'About', 'Dates', 'Status', 'Answer', 'Sent'],
-          ...data.map((r) => [r.studentName ?? `${r.facultyName} (faculty)`, KIND[r.kind], r.subject, dates(r), r.status, r.response ?? '', when(r.createdAt)])]))}>Export CSV</Button>
+      <PageHeader title="Leave requests">
+        <Button disabled={!data?.length} onClick={() => downloadCsv('leave-requests.csv', toCsv([['Student', 'Type', 'Reason', 'Duration', 'Dates', 'Approval', 'Answer', 'Sent'],
+          ...data.map((r) => [r.studentName ?? `${r.facultyName} (faculty)`, KIND[r.kind], r.subject, duration(r), dates(r), r.status, r.response ?? '', when(r.createdAt)])]))}>Export CSV</Button>
       </PageHeader>
+      <p className="muted">Applications for leave from college. Approve or reject each one; the person sees your answer. Concerns students raise also arrive here.</p>
       <Tabs value={tab} onChange={setTab} tabs={[{ value: 'PENDING', label: 'Waiting' }, { value: 'ALL', label: 'Everything' }]} />
       <Alert kind="error">{error?.message}</Alert>
       {loading ? <Loading /> : (
         <Table
           rows={data}
-          empty={tab === 'PENDING' ? 'Nothing is waiting. Nice.' : 'No requests yet.'}
+          empty={tab === 'PENDING' ? 'No leave requests are waiting.' : 'No leave requests yet.'}
           columns={[
-            { key: 'studentName', label: 'From', text: (r) => r.studentName ?? `${r.facultyName} (faculty)`, render: (r) => r.studentName ?? `${r.facultyName} (faculty)` },
+            { key: 'studentName', label: 'Student', text: (r) => r.studentName ?? `${r.facultyName} (faculty)`, render: (r) => r.studentName ?? `${r.facultyName} (faculty)` },
             { key: 'kind', label: 'Type', render: (r) => KIND[r.kind] },
-            { key: 'subject', label: 'About' },
+            { key: 'subject', label: 'Reason' },
+            { key: 'duration', label: 'Duration', render: duration },
             { key: 'dates', label: 'Dates', render: dates },
-            { key: 'status', label: 'Status', render: (r) => <Badge kind={TONE[r.status]}>{r.status.toLowerCase()}</Badge> },
+            { key: 'status', label: 'Approval', render: (r) => <Badge kind={TONE[r.status]}>{r.status.toLowerCase()}</Badge> },
             { key: 'createdAt', label: 'Sent', render: (r) => when(r.createdAt) },
           ]}
           actions={(r) => <Button small variant={r.status === 'PENDING' ? 'primary' : undefined} onClick={() => setOpen(r)}>{r.status === 'PENDING' ? 'Review' : 'View'}</Button>}
