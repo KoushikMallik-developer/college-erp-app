@@ -17,6 +17,7 @@ export default function Login() {
 
   const submit = (e) => {
     e.preventDefault();
+    if (busy) return; // Enter pressed again while the request is still running
     run(() => signInWithEmailAndPassword(auth, loginEmail(email), password));
   };
   const reset = () =>
@@ -38,7 +39,9 @@ export default function Login() {
             <form onSubmit={submit} className="grid gap-[18px] [&_input]:rounded-md [&_input]:border-line [&_input]:bg-soft [&_input]:px-[15px] [&_input]:py-[13px] [&_input]:text-[13px] [&_input:focus]:bg-card [&_label]:min-w-0 [&_label]:text-xs [&_button]:min-h-[46px] [&_button]:rounded-md [&_button.bg-brand]:shadow-[0_5px_12px_var(--glow)]">
               <Input label="Email or username" autoComplete="username" required value={email} onChange={setEmail} />
               <Input label="Password" type="password" autoComplete="current-password" required value={password} onChange={setPassword} />
-              <Button variant="primary" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}<ArrowRight size={17} /></Button>
+              <Button variant="primary" type="submit" disabled={busy} aria-busy={busy}>
+                {busy ? <><span className="size-4 rounded-full border-2 border-white/40 border-t-white motion-safe:animate-spin" aria-hidden="true" />Signing in…</> : <>Sign in<ArrowRight size={17} /></>}
+              </Button>
               <Button onClick={reset} disabled={busy || !email}>Forgot password? Email me a reset link</Button>
             </form>
             <p className="mt-2 text-[11px] leading-[1.7] text-muted"><Link to="/">← Back to home</Link></p>
