@@ -61,6 +61,13 @@
 }
 :root[data-theme='light'] { color-scheme: light; }
 :root[data-theme='dark'] { color-scheme: dark; }
+/* The sidebar follows the theme (light in light mode); other panels, such as the landing band and toasts, stay dark. */
+.sidebar {
+  --panel: light-dark(var(--white), var(--navy-950)); --panel-2: light-dark(var(--slate-50), var(--navy-850));
+  --panel-hover: light-dark(var(--slate-50), var(--navy-700)); --panel-line: light-dark(var(--slate-200), var(--navy-700));
+  --panel-edge: light-dark(var(--slate-200), var(--navy-400)); --panel-text: light-dark(var(--slate-500), var(--navy-200));
+  --panel-muted: light-dark(var(--slate-500), var(--navy-300)); --panel-strong: light-dark(var(--slate-900), var(--navy-100));
+}
 
 /* Tailwind's own colours are switched off, so only ours exist: bg-card, text-ink, border-line, bg-brand-soft, text-blue-100, ... */
 @theme {
